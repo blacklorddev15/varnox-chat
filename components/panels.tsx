@@ -1,0 +1,507 @@
+'use client';
+
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { api, uploadImage } from '@/lib/client';
+import type { ChatRow, PublicUser } from '@/lib/types';
+import { presence } from '@/lib/format';
+import { Avatar } from './avatar';
+import { IconCheck, IconClose, IconSearch } from './icons';
+
+function Sheet({
+  title,
+  children,
+  onClose,
+  footer,
+}: {
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+  footer?: React.ReactNode;
+}) {
+  return (
+    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="sheet">
+        <div className="sheet-head">
+          <h3>{title}</h3>
+          <button type="button" className="icon-btn" onClick={onClose} title="Close">
+            <IconClose />
+          </button>
+        </div>
+        <div className="sheet-body">{children}</div>
+        {footer ? <div className="sheet-foot">{footer}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+function useUserSearch(query: string) {
+  const [results, setResults] = useState<PublicUser[]>([]);
+  const [searching, setSearching] = useState(false);
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 1) {
+      setResults([]);
+      return;
+    }
+    let alive = true;
+    setSearching(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await api<{ users: PublicUser[] }>(`/api/users?q=${encodeURIComponent(q)}`);
+        if (alive) setResults(res.users);
+      } catch {
+        if (alive) setResults([]);
+      } finally {
+        if (alive) setSearching(false);
+      }
+    }, 220);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [query]);
+  return { results, searching };
+}
+
+export function NewChatPanel({
+  me,
+  onClose,
+  onPick,
+}: {
+  me: PublicUser;
+  onClose: () => void;
+  onPick: (userId: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const { results, searching } = useUserSearch(query);
+
+  return (
+    <Sheet title="New chat" onClose={onClose}>
+      <div className="search-box" style={{ marginBottom: 12 }}>
+        <IconSearch size={18} />
+        <input
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search people by username"
+        />
+      </div>
+
+      {!query.trim() ? (
+        <p className="hint">
+          Signed in as <b>@{me.username}</b>. Type a username to find someone — for example{' '}
+          <code>@{me.username}</code> on their side would find you.
+        </p>
+      ) : results.length === 0 ? (
+        <p className="hint">{searching ? 'Searching…' : `No one found for “${query.trim()}”.`}</p>
+      ) : (
+        results.map((user) => (
+          <button key={user.id} type="button" className="pick-row" onClick={() => onPick(user.id)}>
+            <Avatar name={user.displayName} src={user.avatar} size={44} />
+            <span className="body">
+              <b>{user.displayName}</b>
+              <span>@{user.username} · {presence(user.lastSeen)}</span>
+            </span>
+          </button>
+        ))
+      )}
+    </Sheet>
+  );
+}
+
+export function NewGroupPanel({
+  me,
+  onClose,
+  onCreate,
+}: {
+  me: PublicUser;
+  onClose: () => void;
+  onCreate: (name: string, memberIds: string[]) => void;
+}) {
+  const [name, setName] = useState('');
+  const [query, setQuery] = useState('');
+  const [picked, setPicked] = useState<PublicUser[]>([]);
+  const { results } = useUserSearch(query);
+
+  function toggle(user: PublicUser) {
+    setPicked((prev) =>
+      prev.some((p) => p.id === user.id) ? prev.filter((p) => p.id !== user.id) : [...prev, user]
+    );
+  }
+
+  return (
+    <Sheet
+      title="New group"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={!name.trim() || picked.length === 0}
+            onClick={() => onCreate(name.trim(), picked.map((p) => p.id))}
+          >
+            Create group
+          </button>
+        </>
+      }
+    >
+      <div className="field-row">
+        <label htmlFor="group-name">Group name</label>
+        <input
+          id="group-name"
+          className="input"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Weekend plans"
+        />
+      </div>
+
+      {picked.length ? (
+        <div className="chips">
+          {picked.map((p) => (
+            <span key={p.id} className="chip">
+              <Avatar name={p.displayName} src={p.avatar} size={22} />
+              {p.displayName}
+              <button type="button" onClick={() => toggle(p)} title="Remove">
+                <IconClose size={14} />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="search-box" style={{ margin: '10px 0' }}>
+        <IconSearch size={18} />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Add members by username"
+        />
+      </div>
+
+      {query.trim() && results.length === 0 ? (
+        <p className="hint">No one found for “{query.trim()}”.</p>
+      ) : null}
+
+      {results.map((user) => {
+        const on = picked.some((p) => p.id === user.id);
+        return (
+          <button key={user.id} type="button" className="pick-row" onClick={() => toggle(user)}>
+            <Avatar name={user.displayName} src={user.avatar} size={44} />
+            <span className="body">
+              <b>{user.displayName}</b>
+              <span>@{user.username}</span>
+            </span>
+            <span className={`check${on ? ' on' : ''}`}>{on ? <IconCheck size={13} /> : null}</span>
+          </button>
+        );
+      })}
+
+      {!query.trim() ? (
+        <p className="hint" style={{ marginTop: 8 }}>
+          You are the group admin — add at least one member. You can add more people later.
+        </p>
+      ) : null}
+    </Sheet>
+  );
+}
+
+export function ProfilePanel({
+  me,
+  onClose,
+  onSave,
+}: {
+  me: PublicUser;
+  onClose: () => void;
+  onSave: (body: Record<string, unknown>) => void;
+}) {
+  const [displayName, setDisplayName] = useState(me.displayName);
+  const [about, setAbout] = useState(me.about);
+  const [avatar, setAvatar] = useState<string | null>(me.avatar);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  async function pickPhoto(file: File) {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await uploadImage(file);
+      setAvatar(res.url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Sheet
+      title="My profile"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy}
+            onClick={() => onSave({ displayName, about, avatar })}
+          >
+            Save
+          </button>
+        </>
+      }
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 18 }}>
+        <button type="button" onClick={() => fileRef.current?.click()} title="Change photo">
+          <Avatar name={displayName} src={avatar} size={72} />
+        </button>
+        <div>
+          <button type="button" className="btn ghost" onClick={() => fileRef.current?.click()}>
+            {busy ? 'Uploading…' : 'Change photo'}
+          </button>
+          {avatar ? (
+            <button
+              type="button"
+              className="btn ghost"
+              style={{ marginLeft: 8 }}
+              onClick={() => setAvatar(null)}
+            >
+              Remove
+            </button>
+          ) : null}
+          <div className="hint" style={{ marginTop: 6 }}>
+            @{me.username}
+          </div>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) pickPhoto(f);
+            e.target.value = '';
+          }}
+        />
+      </div>
+
+      <div className="field-row">
+        <label htmlFor="display">Display name</label>
+        <input
+          id="display"
+          className="input"
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+          maxLength={40}
+        />
+      </div>
+
+      <div className="field-row">
+        <label htmlFor="about">About</label>
+        <input
+          id="about"
+          className="input"
+          value={about}
+          onChange={(e) => setAbout(e.target.value)}
+          maxLength={140}
+          placeholder="Hey there! I am using Varnox."
+        />
+      </div>
+
+      {error ? <p className="error">{error}</p> : null}
+    </Sheet>
+  );
+}
+
+export function ChatInfoPanel({
+  me,
+  chat,
+  onClose,
+  onUpdate,
+  onLeave,
+}: {
+  me: PublicUser;
+  chat: ChatRow;
+  onClose: () => void;
+  onUpdate: (chatId: string, body: Record<string, unknown>) => void;
+  onLeave: (chatId: string) => void;
+}) {
+  const isGroup = chat.type === 'group';
+  const isAdmin = chat.admins.includes(me.id);
+  const [name, setName] = useState(chat.title);
+  const [query, setQuery] = useState('');
+  const [busy, setBusy] = useState(false);
+  const { results } = useUserSearch(query);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setName(chat.title);
+    setQuery('');
+  }, [chat.id, chat.title]);
+
+  const nonMembers = useMemo(
+    () => results.filter((u) => !chat.members.includes(u.id)),
+    [results, chat.members]
+  );
+
+  async function pickPhoto(file: File) {
+    setBusy(true);
+    try {
+      const res = await uploadImage(file);
+      onUpdate(chat.id, { avatar: res.url });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Sheet title={isGroup ? 'Group info' : 'Contact info'} onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+        <button
+          type="button"
+          onClick={() => (isGroup && isAdmin ? fileRef.current?.click() : undefined)}
+          title={isGroup && isAdmin ? 'Change group photo' : undefined}
+        >
+          <Avatar name={chat.title} src={chat.avatar} size={96} />
+        </button>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 18, fontWeight: 600 }}>{chat.title}</div>
+          <div className="hint">
+            {isGroup
+              ? `Group · ${chat.members.length} members`
+              : `@${chat.peer?.username ?? 'unknown'} · ${presence(chat.peer?.lastSeen ?? 0)}`}
+          </div>
+        </div>
+        {isGroup && isAdmin ? (
+          <>
+            <button type="button" className="btn ghost" onClick={() => fileRef.current?.click()}>
+              {busy ? 'Uploading…' : 'Change group photo'}
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) pickPhoto(f);
+                e.target.value = '';
+              }}
+            />
+          </>
+        ) : null}
+      </div>
+
+      {isGroup && isAdmin ? (
+        <div className="field-row">
+          <label htmlFor="gname">Group name</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              id="gname"
+              className="input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={60}
+            />
+            <button
+              type="button"
+              className="btn"
+              disabled={!name.trim() || name === chat.title}
+              onClick={() => onUpdate(chat.id, { name: name.trim() })}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {isGroup ? (
+        <>
+          <div style={{ margin: '16px 0 6px', fontWeight: 600 }}>
+            {chat.members.length} members
+          </div>
+          {chat.memberProfiles.map((p) => (
+            <div key={p.id} className="member-row">
+              <Avatar name={p.displayName} src={p.avatar} size={42} />
+              <span className="body">
+                <b>
+                  {p.displayName} {p.id === me.id ? ' (you)' : ''}
+                </b>
+                <span>@{p.username}</span>
+              </span>
+              {chat.admins.includes(p.id) ? <span className="tag">admin</span> : null}
+              {isAdmin && p.id !== me.id ? (
+                <button
+                  type="button"
+                  className="icon-btn"
+                  title="Remove from group"
+                  onClick={() => onUpdate(chat.id, { removeMembers: [p.id] })}
+                >
+                  <IconClose size={17} />
+                </button>
+              ) : null}
+            </div>
+          ))}
+
+          <div className="search-box" style={{ margin: '14px 0 6px' }}>
+            <IconSearch size={18} />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Add a member by username"
+            />
+          </div>
+          {query.trim() && nonMembers.length === 0 ? (
+            <p className="hint">No one to add for “{query.trim()}”.</p>
+          ) : null}
+          {nonMembers.map((u) => (
+            <button
+              key={u.id}
+              type="button"
+              className="pick-row"
+              onClick={() => {
+                onUpdate(chat.id, { addMembers: [u.id] });
+                setQuery('');
+              }}
+            >
+              <Avatar name={u.displayName} src={u.avatar} size={42} />
+              <span className="body">
+                <b>{u.displayName}</b>
+                <span>@{u.username}</span>
+              </span>
+              <span className="tag">Add</span>
+            </button>
+          ))}
+        </>
+      ) : (
+        <div className="member-row">
+          <Avatar name={chat.peer?.displayName ?? chat.title} src={chat.peer?.avatar ?? null} size={42} />
+          <span className="body">
+            <b>{chat.peer?.displayName ?? chat.title}</b>
+            <span>{chat.peer?.about || 'No about text'}</span>
+          </span>
+        </div>
+      )}
+
+      <div style={{ marginTop: 20, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
+        <button type="button" className="btn danger" onClick={() => onLeave(chat.id)}>
+          {isGroup ? 'Leave group' : 'Delete chat'}
+        </button>
+        <p className="hint" style={{ marginTop: 8 }}>
+          {isGroup
+            ? 'Leaving removes the group from your chat list. Your messages stay for the other members.'
+            : 'The chat disappears from your list. The other person keeps their copy of the messages.'}
+        </p>
+      </div>
+    </Sheet>
+  );
+}
