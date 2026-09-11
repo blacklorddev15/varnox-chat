@@ -32,12 +32,14 @@ export type Conv = {
   admins: string[];
   createdBy: string;
   createdAt: number;
+  /** Disappearing messages: seconds after which messages vanish (0 = off). */
+  disappearSec: number;
 };
 
 export type LastMsg = {
   id: string;
   text: string;
-  type: 'text' | 'image';
+  type: MessageType;
   senderId: string;
   senderName: string;
   at: number;
@@ -56,7 +58,7 @@ export type MemberMarker = {
   left?: boolean;
 };
 
-export type MessageType = 'text' | 'image' | 'system';
+export type MessageType = 'text' | 'image' | 'audio' | 'file' | 'system';
 
 export type Message = {
   id: string;
@@ -69,6 +71,12 @@ export type Message = {
   mediaUrl?: string;
   mediaW?: number;
   mediaH?: number;
+  /** voice note length in seconds */
+  audioSec?: number;
+  fileName?: string;
+  fileSize?: number;
+  mime?: string;
+  forwarded?: boolean;
   replyTo?: { id: string; text: string; senderName: string } | null;
 };
 
@@ -79,6 +87,34 @@ export type MsgOp = {
   op: 'edit' | 'delete';
   text?: string;
   at: number;
+};
+
+/** Emoji reaction. An empty emoji means the reaction was removed. */
+export type Reaction = {
+  convId: string;
+  msgId: string;
+  userId: string;
+  emoji: string;
+  at: number;
+};
+
+/** A message the user starred, with enough of a snapshot to render it later. */
+export type StarredItem = {
+  userId: string;
+  msgId: string;
+  convId: string;
+  convName: string;
+  at: number;
+  /** newest version wins, so unstarring writes a tombstone at a later timestamp */
+  removed?: boolean;
+  snapshot: {
+    text: string;
+    type: MessageType;
+    senderName: string;
+    at: number;
+    mediaUrl?: string;
+    fileName?: string;
+  };
 };
 
 /** Per-user read state map: convId -> timestamp up to which the user has read. */
@@ -93,6 +129,48 @@ export type ConvRead = {
   convId: string;
   userId: string;
   at: number;
+};
+
+export type WallpaperId = 'doodle' | 'plain' | 'dots' | 'grid' | 'leaf';
+
+export type PrivacyWho = 'everyone' | 'contacts' | 'nobody';
+
+export type ChatPrefs = {
+  pinned?: boolean;
+  muted?: boolean;
+  archived?: boolean;
+};
+
+export type UserSettings = {
+  userId: string;
+  wallpaper: WallpaperId;
+  notifications: boolean;
+  privacy: {
+    lastSeen: PrivacyWho;
+    profilePhoto: PrivacyWho;
+    readReceipts: boolean;
+  };
+  chatPrefs: Record<string, ChatPrefs>;
+  blocked: string[];
+  at: number;
+};
+
+export type TypingState = {
+  convId: string;
+  users: Record<string, number>;
+  at: number;
+};
+
+export type Presence = {
+  userId: string;
+  at: number;
+};
+
+export type Invite = {
+  code: string;
+  convId: string;
+  createdBy: string;
+  createdAt: number;
 };
 
 export type SessionPayload = {
@@ -110,10 +188,14 @@ export type ChatRow = {
   admins: string[];
   createdBy: string;
   createdAt: number;
+  disappearSec: number;
   peer: PublicUser | null;
   memberProfiles: PublicUser[];
   last: LastMsg | null;
   unread: number;
   updatedAt: number;
   readAt: number;
+  pinned: boolean;
+  muted: boolean;
+  archived: boolean;
 };

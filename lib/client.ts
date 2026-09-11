@@ -39,7 +39,7 @@ export function del<T>(path: string, body?: unknown): Promise<T> {
   return api<T>(path, { method: 'DELETE', body: body === undefined ? undefined : JSON.stringify(body) });
 }
 
-/** Downscale an image in the browser before upload so photos stay small and fast. */
+/** Downscale an image in the browser so photos stay small and fast to send. */
 export async function compressImage(file: File, maxSide = 1600, quality = 0.82) {
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -73,10 +73,39 @@ export async function compressImage(file: File, maxSide = 1600, quality = 0.82) 
   return { blob, width: w, height: h };
 }
 
-export async function uploadImage(file: File): Promise<{ url: string; width: number; height: number }> {
-  const { blob, width, height } = await compressImage(file);
+export type UploadResult = {
+  url: string;
+  size: number;
+  mime: string;
+  name: string;
+  width: number;
+  height: number;
+};
+
+/** Upload a photo, voice note or document. Photos are downscaled first. */
+export async function uploadMedia(file: File, kind: 'image' | 'audio' | 'auto'): Promise<UploadResult> {
+  let blob: Blob = file;
+  let width = 0;
+  let height = 0;
+
+  if (kind === 'image' && file.type.startsWith('image/')) {
+    const squeezed = await compressImage(file);
+    blob = squeezed.blob;
+    width = squeezed.width;
+    height = squeezed.height;
+  }
+
   const form = new FormData();
-  form.append('file', new File([blob], 'photo.jpg', { type: blob.type || 'image/jpeg' }));
-  const res = await api<{ url: string }>('/api/upload', { method: 'POST', body: form });
-  return { url: res.url, width, height };
+  form.append('kind', kind);
+  form.append('file', new File([blob], file.name || 'upload', { type: blob.type || file.type }));
+
+  const res = await api<{ url: string; size: number; mime: string; name: string }>('/api/upload', {
+    method: 'POST',
+    body: form,
+  });
+  return { ...res, width, height };
+}
+
+export function uploadImage(file: File): Promise<UploadResult> {
+  return uploadMedia(file, 'image');
 }

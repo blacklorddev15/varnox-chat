@@ -1,13 +1,25 @@
 import { requireUser } from '@/lib/auth';
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
-import { getConv, getConvReads, getMessages } from '@/lib/db';
+import {
+  getConv,
+  getConvReads,
+  getMessages,
+  getReactions,
+  getSettings,
+  getTyping,
+} from '@/lib/db';
 import { newId } from '@/lib/blob';
 import { deliverMessage } from '@/lib/service';
-import type { Message } from '@/lib/types';
+import type { Message, MessageType } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
 type Ctx = { params: Promise<{ id: string }> };
+
+function hideBeforeFor(disappearSec: number | undefined): number | undefined {
+  if (!disappearSec) return undefined;
+  return Date.now() - disappearSec * 1000;
+}
 
 export async function GET(req: Request, ctx: Ctx) {
   return handle(async () => {
@@ -20,21 +32,29 @@ export async function GET(req: Request, ctx: Ctx) {
     const url = new URL(req.url);
     const sinceRaw = url.searchParams.get('since');
     const cursor = url.searchParams.get('cursor') ?? undefined;
-    const limit = Number(url.searchParams.get('limit') ?? 40);
+    const limit = Number(url.searchParams.get('limit') ?? 45);
 
     const since = sinceRaw ? Number(sinceRaw) : undefined;
-    const result = await getMessages(id, {
-      limit: Number.isFinite(limit) ? limit : 40,
-      cursor,
-      since: since && since > 0 ? since : undefined,
-    });
+    const [result, reads, reactions, typing] = await Promise.all([
+      getMessages(id, {
+        limit: Number.isFinite(limit) ? limit : 45,
+        cursor,
+        since: since && since > 0 ? since : undefined,
+        hideBefore: hideBeforeFor(conv.disappearSec),
+      }),
+      getConvReads(id),
+      getReactions(id),
+      getTyping(id),
+    ]);
 
-    const reads = await getConvReads(id);
     return ok({
       messages: result.messages,
       cursor: result.cursor ?? null,
       hasMore: result.hasMore,
       reads,
+      reactions,
+      typing: typing.filter((uid) => uid !== me.id),
+      disappearSec: conv.disappearSec ?? 0,
       serverAt: Date.now(),
     });
   });
@@ -42,10 +62,14 @@ export async function GET(req: Request, ctx: Ctx) {
 
 type SendBody = {
   text?: string;
-  type?: 'text' | 'image';
+  type?: MessageType;
   mediaUrl?: string;
   mediaW?: number;
   mediaH?: number;
+  audioSec?: number;
+  fileName?: string;
+  fileSize?: number;
+  mime?: string;
   replyTo?: { id: string; text: string; senderName: string } | null;
 };
 
@@ -58,12 +82,25 @@ export async function POST(req: Request, ctx: Ctx) {
     if (!conv.members.includes(me.id)) return bad('You are not in this chat', 403);
 
     const body = await readJsonBody<SendBody>(req);
-    const type = body.type === 'image' ? 'image' : 'text';
+    const type: MessageType = ['image', 'audio', 'file'].includes(String(body.type))
+      ? (body.type as MessageType)
+      : 'text';
     const text = clean(body.text, 4000);
     const mediaUrl = clean(body.mediaUrl, 600);
 
     if (type === 'text' && !text) return bad('Message is empty');
-    if (type === 'image' && !mediaUrl) return bad('Image upload failed');
+    if (type !== 'text' && !mediaUrl) return bad('Upload failed');
+
+    // Blocking: a direct chat is closed for both sides.
+    if (conv.type === 'direct') {
+      const peerId = conv.members.find((m) => m !== me.id);
+      if (peerId) {
+        const [mine, theirs] = await Promise.all([getSettings(me.id), getSettings(peerId)]);
+        if (mine.blocked.includes(peerId) || theirs.blocked.includes(me.id)) {
+          return bad("You can't send messages to this contact", 403);
+        }
+      }
+    }
 
     const msg: Message = {
       id: newId('m'),
@@ -78,6 +115,17 @@ export async function POST(req: Request, ctx: Ctx) {
       msg.mediaUrl = mediaUrl;
       if (body.mediaW) msg.mediaW = Math.round(Number(body.mediaW)) || undefined;
       if (body.mediaH) msg.mediaH = Math.round(Number(body.mediaH)) || undefined;
+    }
+    if (type === 'audio') {
+      msg.mediaUrl = mediaUrl;
+      msg.audioSec = Math.max(1, Math.round(Number(body.audioSec) || 1));
+      msg.mime = clean(body.mime, 80) || 'audio/webm';
+    }
+    if (type === 'file') {
+      msg.mediaUrl = mediaUrl;
+      msg.fileName = clean(body.fileName, 160) || 'Document';
+      msg.fileSize = Math.max(0, Math.round(Number(body.fileSize) || 0));
+      msg.mime = clean(body.mime, 120) || 'application/octet-stream';
     }
     if (body.replyTo?.id) {
       msg.replyTo = {

@@ -1,7 +1,7 @@
 import { requireUser } from '@/lib/auth';
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
 import { chatSummaries, getUser } from '@/lib/db';
-import { buildChatRow } from '@/lib/present';
+import { buildChatRow, emptySummary } from '@/lib/present';
 import { createGroupConv, ensureDirectConv } from '@/lib/service';
 
 export const dynamic = 'force-dynamic';
@@ -34,20 +34,8 @@ export async function POST(req: Request) {
       if (!other) return bad('That user no longer exists', 404);
       const conv = await ensureDirectConv(me, otherId);
       const rows = await chatSummaries(me.id);
-      const summary = rows.find((r) => r.conv.id === conv.id);
-      if (summary) return ok({ chat: await buildChatRow(me.id, summary) }, 201);
-      return ok(
-        {
-          chat: await buildChatRow(me.id, {
-            conv,
-            last: null,
-            unread: 0,
-            readAt: 0,
-            updatedAt: Date.now(),
-          }),
-        },
-        201
-      );
+      const summary = rows.find((r) => r.conv.id === conv.id) ?? emptySummary(conv);
+      return ok({ chat: await buildChatRow(me.id, summary) }, 201);
     }
 
     if (body.type === 'group') {
@@ -56,18 +44,7 @@ export async function POST(req: Request) {
       if (!name) return bad('Give the group a name');
       if (members.length < 1) return bad('Add at least one member');
       const conv = await createGroupConv(me, name, members);
-      return ok(
-        {
-          chat: await buildChatRow(me.id, {
-            conv,
-            last: null,
-            unread: 0,
-            readAt: 0,
-            updatedAt: Date.now(),
-          }),
-        },
-        201
-      );
+      return ok({ chat: await buildChatRow(me.id, emptySummary(conv)) }, 201);
     }
 
     return bad('Unsupported conversation type');

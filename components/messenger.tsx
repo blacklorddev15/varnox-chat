@@ -2,49 +2,102 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, post, uploadImage } from '@/lib/client';
-import type { ChatRow, Message, PublicUser } from '@/lib/types';
+import { api, post, uploadMedia } from '@/lib/client';
+import type {
+  ChatRow,
+  Message,
+  PublicUser,
+  StarredItem,
+  UserSettings,
+} from '@/lib/types';
 import { Sidebar } from './sidebar';
 import { ChatPane } from './chat-pane';
+import { SettingsScreen } from './settings-screen';
+import { StarredPanel, SearchPanel, ForwardPanel } from './overlays';
 import { NewChatPanel, NewGroupPanel, ProfilePanel, ChatInfoPanel } from './panels';
+
+export type ReplyDraft = { id: string; text: string; senderName: string } | null;
 
 type MessagesResponse = {
   messages: Message[];
   cursor: string | null;
   hasMore: boolean;
   reads: Record<string, number>;
+  reactions: Record<string, Record<string, string>>;
+  typing: string[];
+  disappearSec: number;
   serverAt: number;
 };
 
-export type ReplyDraft = { id: string; text: string; senderName: string } | null;
+const DEFAULT_SETTINGS: UserSettings = {
+  userId: '',
+  wallpaper: 'doodle',
+  notifications: true,
+  privacy: { lastSeen: 'everyone', profilePhoto: 'everyone', readReceipts: true },
+  chatPrefs: {},
+  blocked: [],
+  at: 0,
+};
+
+function beep() {
+  try {
+    const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctor) return;
+    const ctx = new Ctor();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.09, ctx.currentTime + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.3);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.32);
+    window.setTimeout(() => ctx.close().catch(() => undefined), 600);
+  } catch {
+    /* audio is a nicety, never a blocker */
+  }
+}
 
 export function Messenger({ me: initialMe }: { me: PublicUser }) {
   const router = useRouter();
   const [me, setMe] = useState<PublicUser>(initialMe);
+  const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [chats, setChats] = useState<ChatRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [reads, setReads] = useState<Record<string, number>>({});
+  const [reactions, setReactions] = useState<Record<string, Record<string, string>>>({});
+  const [typing, setTyping] = useState<string[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
+  const [disappearSec, setDisappearSec] = useState(0);
   const [listReady, setListReady] = useState(false);
   const [openingChat, setOpeningChat] = useState(false);
   const [sending, setSending] = useState(false);
   const [reply, setReply] = useState<ReplyDraft>(null);
-  const [panel, setPanel] = useState<null | 'new-chat' | 'new-group' | 'profile' | 'info'>(null);
+  const [selection, setSelection] = useState<string[]>([]);
+  const [panel, setPanel] = useState<
+    null | 'new-chat' | 'new-group' | 'profile' | 'chat-info' | 'settings' | 'starred' | 'search' | 'forward'
+  >(null);
+  const [starred, setStarred] = useState<StarredItem[]>([]);
   const [toast, setToast] = useState('');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [filter, setFilter] = useState<'all' | 'unread' | 'groups'>('all');
+  const [forwardIds, setForwardIds] = useState<string[]>([]);
 
   const lastAtRef = useRef(0);
   const selectedRef = useRef<string | null>(null);
   const messagesBox = useRef<HTMLDivElement | null>(null);
+  const seenLastIds = useRef<Map<string, string>>(new Map());
+  const firstListLoad = useRef(true);
+  const typingSentAt = useRef(0);
 
-  const selected = useMemo(
-    () => chats.find((c) => c.id === selectedId) ?? null,
-    [chats, selectedId]
-  );
+  const selected = useMemo(() => chats.find((c) => c.id === selectedId) ?? null, [chats, selectedId]);
 
-  /* ------------------------------------------------------------- theme */
+  /* ---------------------------------------------------------------- theme */
 
   useEffect(() => {
     const attr = document.documentElement.getAttribute('data-theme');
@@ -64,58 +117,164 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
     });
   }, []);
 
-  /* ------------------------------------------------------------- data */
-
   const flash = useCallback((message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(''), 2600);
   }, []);
+
+  /* -------------------------------------------------------------- settings */
+
+  const loadSettings = useCallback(async () => {
+    try {
+      const res = await api<{ settings: UserSettings }>('/api/settings');
+      setSettings(res.settings);
+    } catch {
+      /* keep defaults */
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
+
+  const saveSettings = useCallback(
+    async (patchBody: Record<string, unknown>) => {
+      try {
+        const res = await api<{ settings: UserSettings }>('/api/settings', {
+          method: 'PATCH',
+          body: JSON.stringify(patchBody),
+        });
+        setSettings(res.settings);
+        return res.settings;
+      } catch (err) {
+        flash(err instanceof Error ? err.message : 'Could not save settings');
+        return null;
+      }
+    },
+    [flash]
+  );
+
+  /* ----------------------------------------------------------------- data */
 
   const loadChats = useCallback(async () => {
     try {
       const res = await api<{ chats: ChatRow[] }>('/api/chats');
       setChats(res.chats);
       setListReady(true);
+
+      const map = seenLastIds.current;
+      const fresh: ChatRow[] = [];
+      for (const chat of res.chats) {
+        const last = chat.last;
+        if (!last) continue;
+        const known = map.get(chat.id);
+        if (known !== last.id) {
+          map.set(chat.id, last.id);
+          if (!firstListLoad.current && last.senderId !== me.id) fresh.push(chat);
+        }
+      }
+      firstListLoad.current = false;
+
+      if (fresh.length && document.visibilityState !== 'visible' && settings.notifications) {
+        beep();
+        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          for (const chat of fresh.slice(0, 3)) {
+            try {
+              const n = new Notification(chat.title, {
+                body: chat.last?.text || 'New message',
+                icon: '/icon-192.png',
+                tag: chat.id,
+              });
+              n.onclick = () => {
+                window.focus();
+                openChatRef.current?.(chat.id);
+              };
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+      }
       return res.chats;
     } catch (err) {
-      if (err instanceof Error && /not signed in/i.test(err.message)) {
-        router.replace('/login');
-      }
+      if (err instanceof Error && /not signed in/i.test(err.message)) router.replace('/login');
       return null;
     }
-  }, [router]);
+  }, [me.id, router, settings.notifications]);
 
-  const openChat = useCallback(async (chatId: string) => {
-    selectedRef.current = chatId;
-    setSelectedId(chatId);
-    setMessages([]);
-    setCursor(null);
-    setHasMore(false);
-    setReply(null);
-    setOpeningChat(true);
-    try {
-      const res = await api<MessagesResponse>(`/api/chats/${chatId}/messages?limit=45`);
-      setMessages(res.messages);
-      setCursor(res.cursor);
-      setHasMore(res.hasMore);
-      setReads(res.reads);
-      lastAtRef.current = res.messages.length ? res.messages[res.messages.length - 1].at : 0;
-    } catch (err) {
-      flash(err instanceof Error ? err.message : 'Could not open that chat');
-    } finally {
-      setOpeningChat(false);
-    }
-  }, [flash]);
+  /* presence heartbeat, also reports which peers are online */
+  useEffect(() => {
+    let cancelled = false;
+    const ping = async () => {
+      const ids = Array.from(new Set(chats.flatMap((c) => c.members))).filter((id) => id !== me.id);
+      try {
+        const res = await post<{ presence: Record<string, number> }>('/api/presence', { ids });
+        if (cancelled) return;
+        setChats((prev) =>
+          prev.map((chat) => ({
+            ...chat,
+            peer: chat.peer
+              ? { ...chat.peer, lastSeen: Math.max(chat.peer.lastSeen, res.presence[chat.peer.id] ?? 0) }
+              : chat.peer,
+            memberProfiles: chat.memberProfiles.map((p) => ({
+              ...p,
+              lastSeen: Math.max(p.lastSeen, res.presence[p.id] ?? 0),
+            })),
+          }))
+        );
+      } catch {
+        /* ignore */
+      }
+    };
+    ping();
+    const id = window.setInterval(ping, 45_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [chats.length, me.id]);
+
+  const openChat = useCallback(
+    async (chatId: string) => {
+      selectedRef.current = chatId;
+      setSelectedId(chatId);
+      setMessages([]);
+      setCursor(null);
+      setHasMore(false);
+      setReply(null);
+      setSelection([]);
+      setTyping([]);
+      setOpeningChat(true);
+      try {
+        const res = await api<MessagesResponse>(`/api/chats/${chatId}/messages?limit=45`);
+        setMessages(res.messages);
+        setCursor(res.cursor);
+        setHasMore(res.hasMore);
+        setReads(res.reads);
+        setReactions(res.reactions);
+        setDisappearSec(res.disappearSec);
+        lastAtRef.current = res.messages.length ? res.messages[res.messages.length - 1].at : 0;
+      } catch (err) {
+        flash(err instanceof Error ? err.message : 'Could not open that chat');
+      } finally {
+        setOpeningChat(false);
+      }
+    },
+    [flash]
+  );
+  const openChatRef = useRef<((id: string) => void) | null>(null);
+  openChatRef.current = openChat;
 
   const pollOpenChat = useCallback(async () => {
     const chatId = selectedRef.current;
     if (!chatId) return;
     try {
       const since = lastAtRef.current || 1;
-      const res = await api<MessagesResponse>(
-        `/api/chats/${chatId}/messages?since=${since}`
-      );
+      const res = await api<MessagesResponse>(`/api/chats/${chatId}/messages?since=${since}`);
       setReads(res.reads);
+      setReactions(res.reactions);
+      setTyping(res.typing);
+      setDisappearSec(res.disappearSec);
       if (res.messages.length) {
         setMessages((prev) => {
           const seen = new Set(prev.map((m) => m.id));
@@ -150,7 +309,6 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
     }
   }, [cursor, flash]);
 
-  /* initial list load + background refresh */
   useEffect(() => {
     loadChats();
   }, [loadChats]);
@@ -163,23 +321,24 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
     return () => window.clearInterval(id);
   }, [loadChats]);
 
-  /* poll the open conversation */
   useEffect(() => {
     if (!selectedId) return;
     const id = window.setInterval(() => {
       if (document.visibilityState === 'visible') pollOpenChat();
     }, 2000);
     const onVisible = () => {
-      if (document.visibilityState === 'visible') pollOpenChat();
+      if (document.visibilityState === 'visible') {
+        pollOpenChat();
+        loadChats();
+      }
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       window.clearInterval(id);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [selectedId, pollOpenChat]);
+  }, [selectedId, pollOpenChat, loadChats]);
 
-  /* mark the open chat as read */
   useEffect(() => {
     const chatId = selectedRef.current;
     if (!chatId || !messages.length) return;
@@ -190,15 +349,11 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
       .catch(() => undefined);
   }, [messages, loadChats]);
 
-  /* keep the view pinned to the newest message */
-  const prevCount = useRef(0);
   useEffect(() => {
     const box = messagesBox.current;
     if (!box) return;
-    const grew = messages.length > prevCount.current;
-    prevCount.current = messages.length;
     const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 320;
-    if (grew && nearBottom) {
+    if (nearBottom) {
       requestAnimationFrame(() => {
         box.scrollTop = box.scrollHeight;
       });
@@ -207,30 +362,68 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
 
   /* ------------------------------------------------------------- actions */
 
+  const notifyTyping = useCallback(() => {
+    const chatId = selectedRef.current;
+    if (!chatId) return;
+    const now = Date.now();
+    if (now - typingSentAt.current < 3000) return;
+    typingSentAt.current = now;
+    post(`/api/chats/${chatId}/typing`).catch(() => undefined);
+  }, []);
+
   const send = useCallback(
-    async (text: string, image?: File | null) => {
+    async (payload: {
+      text: string;
+      image?: File | null;
+      audio?: { blob: Blob; sec: number } | null;
+      file?: File | null;
+    }) => {
       const chatId = selectedRef.current;
       if (!chatId || sending) return;
       setSending(true);
       try {
-        let body: Record<string, unknown> = { type: 'text', text, replyTo: reply };
-        if (image) {
-          const uploaded = await uploadImage(image);
+        let body: Record<string, unknown> = { type: 'text', text: payload.text, replyTo: reply };
+        if (payload.image) {
+          const up = await uploadMedia(payload.image, 'image');
           body = {
             type: 'image',
-            text,
-            mediaUrl: uploaded.url,
-            mediaW: uploaded.width,
-            mediaH: uploaded.height,
+            text: payload.text,
+            mediaUrl: up.url,
+            mediaW: up.width,
+            mediaH: up.height,
+            replyTo: reply,
+          };
+        } else if (payload.audio) {
+          const up = await uploadMedia(
+            new File([payload.audio.blob], 'voice.webm', { type: payload.audio.blob.type || 'audio/webm' }),
+            'audio'
+          );
+          body = {
+            type: 'audio',
+            text: '',
+            mediaUrl: up.url,
+            audioSec: payload.audio.sec,
+            mime: up.mime,
+            replyTo: reply,
+          };
+        } else if (payload.file) {
+          const up = await uploadMedia(payload.file, 'auto');
+          body = {
+            type: 'file',
+            text: payload.text,
+            mediaUrl: up.url,
+            fileName: payload.file.name,
+            fileSize: up.size,
+            mime: up.mime,
             replyTo: reply,
           };
         }
+
         const res = await post<{ message: Message }>(`/api/chats/${chatId}/messages`, body);
         setMessages((prev) => {
           if (prev.some((m) => m.id === res.message.id)) return prev;
-          const next = [...prev, res.message];
           lastAtRef.current = res.message.at;
-          return next;
+          return [...prev, res.message];
         });
         setReply(null);
         window.setTimeout(() => loadChats(), 250);
@@ -243,6 +436,21 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
     [flash, loadChats, reply, sending]
   );
 
+  const react = useCallback(
+    async (msg: Message, emoji: string) => {
+      try {
+        const res = await post<{ reactions: Record<string, Record<string, string>> }>(
+          `/api/messages/${msg.id}/react`,
+          { convId: msg.convId, emoji }
+        );
+        setReactions(res.reactions);
+      } catch (err) {
+        flash(err instanceof Error ? err.message : 'Could not react');
+      }
+    },
+    [flash]
+  );
+
   const editMessage = useCallback(
     async (msg: Message, text: string) => {
       try {
@@ -250,9 +458,7 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
           method: 'PATCH',
           body: JSON.stringify({ convId: msg.convId, text }),
         });
-        setMessages((prev) =>
-          prev.map((m) => (m.id === msg.id ? { ...m, text } : m))
-        );
+        setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, text } : m)));
       } catch (err) {
         flash(err instanceof Error ? err.message : 'Could not edit that message');
       }
@@ -273,6 +479,84 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
       }
     },
     [flash, loadChats]
+  );
+
+  const starMessage = useCallback(
+    async (msg: Message, on: boolean) => {
+      try {
+        if (on) await post(`/api/messages/${msg.id}/star`, { convId: msg.convId });
+        else await api(`/api/messages/${msg.id}/star?convId=${encodeURIComponent(msg.convId)}`, { method: 'DELETE' });
+        flash(on ? 'Message starred' : 'Star removed');
+      } catch (err) {
+        flash(err instanceof Error ? err.message : 'Could not update the star');
+      }
+    },
+    [flash]
+  );
+
+  const openStarred = useCallback(async () => {
+    setPanel('starred');
+    try {
+      const res = await api<{ starred: StarredItem[] }>('/api/starred');
+      setStarred(res.starred);
+    } catch {
+      setStarred([]);
+    }
+  }, []);
+
+  const bulkAction = useCallback(
+    async (action: 'delete' | 'star' | 'unstar') => {
+      const chatId = selectedRef.current;
+      if (!chatId || !selection.length) return;
+      try {
+        const res = await post<Record<string, number>>('/api/messages/bulk', {
+          convId: chatId,
+          ids: selection,
+          action,
+        });
+        if (action === 'delete') {
+          setMessages((prev) => prev.filter((m) => !selection.includes(m.id)));
+          const skipped = res.skipped ?? 0;
+          flash(skipped ? `Deleted ${res.deleted}; ${skipped} were not yours` : `Deleted ${res.deleted}`);
+        } else {
+          flash(action === 'star' ? `Starred ${res.starred}` : `Unstarred ${res.unstarred}`);
+        }
+        setSelection([]);
+        window.setTimeout(() => loadChats(), 250);
+      } catch (err) {
+        flash(err instanceof Error ? err.message : 'Action failed');
+      }
+    },
+    [flash, loadChats, selection]
+  );
+
+  const startForward = useCallback(
+    (ids: string[]) => {
+      setForwardIds(ids);
+      setPanel('forward');
+    },
+    []
+  );
+
+  const doForward = useCallback(
+    async (targets: string[]) => {
+      const chatId = selectedRef.current;
+      if (!chatId || !forwardIds.length) return;
+      try {
+        const res = await post<{ forwarded: number }>('/api/messages/forward', {
+          convId: chatId,
+          ids: forwardIds,
+          targets,
+        });
+        setPanel(null);
+        setSelection([]);
+        flash(`Forwarded ${res.forwarded}`);
+        window.setTimeout(() => loadChats(), 300);
+      } catch (err) {
+        flash(err instanceof Error ? err.message : 'Forward failed');
+      }
+    },
+    [flash, forwardIds, loadChats]
   );
 
   const startChatWith = useCallback(
@@ -332,12 +616,23 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
       try {
         await api(`/api/chats/${chatId}`, { method: 'PATCH', body: JSON.stringify(body) });
         await loadChats();
-        flash('Group updated');
+        if (body.disappearSec !== undefined) setDisappearSec(Number(body.disappearSec));
+        flash('Chat updated');
       } catch (err) {
-        flash(err instanceof Error ? err.message : 'Could not update the group');
+        flash(err instanceof Error ? err.message : 'Could not update the chat');
       }
     },
     [flash, loadChats]
+  );
+
+  const setPref = useCallback(
+    async (chatId: string, pref: Record<string, boolean>) => {
+      const current = settings.chatPrefs[chatId] ?? {};
+      const next = { ...settings.chatPrefs, [chatId]: { ...current, ...pref } };
+      setSettings((s) => ({ ...s, chatPrefs: next }));
+      await saveSettings({ chatPrefs: next });
+    },
+    [saveSettings, settings.chatPrefs]
   );
 
   const saveProfile = useCallback(
@@ -357,28 +652,64 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
     [flash]
   );
 
+  const joinByCode = useCallback(
+    async (code: string) => {
+      try {
+        const res = await post<{ chat: ChatRow }>('/api/join', { code });
+        await loadChats();
+        await openChat(res.chat.id);
+        flash('Joined the group');
+      } catch (err) {
+        flash(err instanceof Error ? err.message : 'Could not join');
+      }
+    },
+    [flash, loadChats, openChat]
+  );
+
   const signOut = useCallback(async () => {
     await post('/api/auth/logout').catch(() => undefined);
     router.replace('/login');
     router.refresh();
   }, [router]);
 
-  /* ------------------------------------------------------------- render */
+  const visible = useMemo(() => {
+    const active = chats.filter((c) => !c.archived);
+    const filtered =
+      filter === 'unread'
+        ? active.filter((c) => c.unread > 0)
+        : filter === 'groups'
+          ? active.filter((c) => c.type === 'group')
+          : active;
+    return [...filtered].sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      return b.updatedAt - a.updatedAt;
+    });
+  }, [chats, filter]);
+
+  const archived = useMemo(() => chats.filter((c) => c.archived), [chats]);
 
   return (
     <div className={`app${selectedId ? ' show-chat' : ''}`}>
       <Sidebar
         me={me}
-        chats={chats}
+        settings={settings}
+        chats={visible}
+        archived={archived}
         ready={listReady}
         selectedId={selectedId}
-        theme={theme}
-        onToggleTheme={toggleTheme}
+        filter={filter}
+        onFilter={setFilter}
         onSelectChat={openChat}
         onNewChat={() => setPanel('new-chat')}
         onNewGroup={() => setPanel('new-group')}
         onProfile={() => setPanel('profile')}
+        onSettings={() => setPanel('settings')}
+        onStarred={openStarred}
+        onSearch={() => setPanel('search')}
+        onJoinByCode={joinByCode}
+        onToggleTheme={toggleTheme}
         onSignOut={signOut}
+        onToggleArchive={(chatId, on) => setPref(chatId, { archived: on })}
       />
 
       <ChatPane
@@ -386,11 +717,16 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
         chat={selected}
         messages={messages}
         reads={reads}
+        reactions={reactions}
+        typing={typing}
+        disappearSec={disappearSec}
         hasMore={hasMore}
         loading={openingChat}
         sending={sending}
         reply={reply}
+        selection={selection}
         theme={theme}
+        wallpaper={settings.wallpaper}
         boxRef={messagesBox}
         onBack={() => {
           selectedRef.current = null;
@@ -398,12 +734,19 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
           setMessages([]);
         }}
         onToggleTheme={toggleTheme}
-        onOpenInfo={() => setPanel('info')}
+        onOpenInfo={() => setPanel('chat-info')}
         onSend={send}
+        onReact={react}
         onReply={setReply}
         onEdit={editMessage}
         onDelete={deleteMessage}
+        onStar={starMessage}
+        onForward={startForward}
+        onSelection={setSelection}
+        onBulk={bulkAction}
+        onTyping={notifyTyping}
         onLoadOlder={loadOlder}
+        blocked={Boolean(selected?.peer && settings.blocked.includes(selected.peer.id))}
       />
 
       {panel === 'new-chat' ? (
@@ -418,14 +761,61 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
         <ProfilePanel me={me} onClose={() => setPanel(null)} onSave={saveProfile} />
       ) : null}
 
-      {panel === 'info' && selected ? (
+      {panel === 'chat-info' && selected ? (
         <ChatInfoPanel
           me={me}
           chat={selected}
           onClose={() => setPanel(null)}
           onUpdate={updateChat}
           onLeave={leaveChat}
+          onBlock={async (blocked) => {
+            if (!selected.peer) return;
+            const list = blocked
+              ? Array.from(new Set([...settings.blocked, selected.peer.id]))
+              : settings.blocked.filter((id) => id !== selected.peer?.id);
+            await saveSettings({ blocked: list });
+            flash(blocked ? 'Contact blocked' : 'Contact unblocked');
+          }}
+          blocked={Boolean(selected.peer && settings.blocked.includes(selected.peer.id))}
         />
+      ) : null}
+
+      {panel === 'settings' ? (
+        <SettingsScreen
+          me={me}
+          settings={settings}
+          onClose={() => setPanel(null)}
+          onSave={saveSettings}
+          onEditProfile={() => setPanel('profile')}
+          onSignOut={signOut}
+          onOpenStarred={openStarred}
+          onToast={flash}
+        />
+      ) : null}
+
+      {panel === 'starred' ? (
+        <StarredPanel
+          items={starred}
+          onClose={() => setPanel(null)}
+          onOpenChat={(chatId) => {
+            setPanel(null);
+            openChat(chatId);
+          }}
+        />
+      ) : null}
+
+      {panel === 'search' ? (
+        <SearchPanel
+          onClose={() => setPanel(null)}
+          onOpenChat={(chatId) => {
+            setPanel(null);
+            openChat(chatId);
+          }}
+        />
+      ) : null}
+
+      {panel === 'forward' ? (
+        <ForwardPanel chats={chats} onClose={() => setPanel(null)} onForward={doForward} />
       ) : null}
 
       {toast ? <div className="toast">{toast}</div> : null}

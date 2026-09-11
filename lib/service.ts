@@ -26,6 +26,7 @@ export async function ensureDirectConv(me: User, otherId: string): Promise<Conv>
     admins: [],
     createdBy: me.id,
     createdAt: now,
+    disappearSec: 0,
   };
   await saveConv(conv);
   await Promise.all(
@@ -60,6 +61,7 @@ export async function createGroupConv(
     admins: [me.id],
     createdBy: me.id,
     createdAt: now,
+    disappearSec: 0,
   };
   await saveConv(conv);
 
@@ -97,10 +99,17 @@ export async function createGroupConv(
   return conv;
 }
 
+function previewFor(msg: Message): string {
+  if (msg.type === 'image') return 'Photo';
+  if (msg.type === 'audio') return 'Voice message';
+  if (msg.type === 'file') return msg.fileName || 'Document';
+  return msg.text;
+}
+
 /** Persist a message and refresh every member's conversation index entry. */
 export async function deliverMessage(me: User, conv: Conv, msg: Message): Promise<Message> {
   await saveMessage(msg);
-  const preview = msg.type === 'image' ? 'Photo' : msg.text;
+  const preview = previewFor(msg);
   await Promise.all(
     conv.members.map((uid) =>
       putMarker({
@@ -113,7 +122,7 @@ export async function deliverMessage(me: User, conv: Conv, msg: Message): Promis
         last: {
           id: msg.id,
           text: preview,
-          type: msg.type === 'image' ? 'image' : 'text',
+          type: msg.type,
           senderId: me.id,
           senderName: me.displayName,
           at: msg.at,
@@ -122,6 +131,25 @@ export async function deliverMessage(me: User, conv: Conv, msg: Message): Promis
     )
   );
   return msg;
+}
+
+/** Copy a message into another conversation (forward). */
+export async function forwardMessage(
+  me: User,
+  target: Conv,
+  source: Message
+): Promise<Message> {
+  const copy: Message = {
+    ...source,
+    id: newId('m'),
+    convId: target.id,
+    senderId: me.id,
+    senderName: me.displayName,
+    at: Date.now(),
+    forwarded: true,
+    replyTo: null,
+  };
+  return deliverMessage(me, target, copy);
 }
 
 /**
@@ -134,8 +162,8 @@ export async function refreshConv(conv: Conv, members = conv.members): Promise<C
   const last = lastMsg
     ? {
         id: lastMsg.id,
-        text: lastMsg.type === 'image' ? 'Photo' : lastMsg.text,
-        type: (lastMsg.type === 'image' ? 'image' : 'text') as 'text' | 'image',
+        text: previewFor(lastMsg),
+        type: lastMsg.type,
         senderId: lastMsg.senderId,
         senderName: lastMsg.senderName,
         at: lastMsg.at,

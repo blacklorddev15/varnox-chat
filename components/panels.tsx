@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, uploadImage } from '@/lib/client';
+import { api, post, uploadImage } from '@/lib/client';
 import type { ChatRow, PublicUser } from '@/lib/types';
 import { presence } from '@/lib/format';
 import { Avatar } from './avatar';
-import { IconCheck, IconClose, IconSearch } from './icons';
+import { MediaGallery } from './overlays';
+import { IconCheck, IconClock, IconClose, IconLink, IconSearch } from './icons';
 
 function Sheet({
   title,
@@ -23,7 +24,7 @@ function Sheet({
       <div className="sheet">
         <div className="sheet-head">
           <h3>{title}</h3>
-          <button type="button" className="icon-btn" onClick={onClose} title="Close">
+          <button type="button" className="header-btn" onClick={onClose} title="Close">
             <IconClose />
           </button>
         </div>
@@ -89,8 +90,8 @@ export function NewChatPanel({
 
       {!query.trim() ? (
         <p className="hint">
-          Signed in as <b>@{me.username}</b>. Type a username to find someone — for example{' '}
-          <code>@{me.username}</code> on their side would find you.
+          Signed in as <b>@{me.username}</b>. Type a username to find someone — if they register at
+          this same address with the username you type, you will find each other here.
         </p>
       ) : results.length === 0 ? (
         <p className="hint">{searching ? 'Searching…' : `No one found for “${query.trim()}”.`}</p>
@@ -100,7 +101,9 @@ export function NewChatPanel({
             <Avatar name={user.displayName} src={user.avatar} size={44} />
             <span className="body">
               <b>{user.displayName}</b>
-              <span>@{user.username} · {presence(user.lastSeen)}</span>
+              <span>
+                @{user.username} · {presence(user.lastSeen)}
+              </span>
             </span>
           </button>
         ))
@@ -176,11 +179,7 @@ export function NewGroupPanel({
 
       <div className="search-box" style={{ margin: '10px 0' }}>
         <IconSearch size={18} />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Add members by username"
-        />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Add members" />
       </div>
 
       {query.trim() && results.length === 0 ? (
@@ -203,7 +202,8 @@ export function NewGroupPanel({
 
       {!query.trim() ? (
         <p className="hint" style={{ marginTop: 8 }}>
-          You are the group admin — add at least one member. You can add more people later.
+          You become the group admin. Once the group exists you can share an invite link from the
+          group info screen.
         </p>
       ) : null}
     </Sheet>
@@ -261,7 +261,7 @@ export function ProfilePanel({
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 18 }}>
         <button type="button" onClick={() => fileRef.current?.click()} title="Change photo">
-          <Avatar name={displayName} src={avatar} size={72} />
+          <Avatar name={displayName} src={avatar} size={74} />
         </button>
         <div>
           <button type="button" className="btn ghost" onClick={() => fileRef.current?.click()}>
@@ -322,23 +322,35 @@ export function ProfilePanel({
   );
 }
 
+const TIMERS: { sec: number; label: string }[] = [
+  { sec: 0, label: 'Off' },
+  { sec: 86_400, label: '24 hours' },
+  { sec: 604_800, label: '7 days' },
+  { sec: 7_776_000, label: '90 days' },
+];
+
 export function ChatInfoPanel({
   me,
   chat,
   onClose,
   onUpdate,
   onLeave,
+  onBlock,
+  blocked,
 }: {
   me: PublicUser;
   chat: ChatRow;
   onClose: () => void;
   onUpdate: (chatId: string, body: Record<string, unknown>) => void;
   onLeave: (chatId: string) => void;
+  onBlock: (blocked: boolean) => void;
+  blocked: boolean;
 }) {
   const isGroup = chat.type === 'group';
   const isAdmin = chat.admins.includes(me.id);
   const [name, setName] = useState(chat.title);
   const [query, setQuery] = useState('');
+  const [invite, setInvite] = useState('');
   const [busy, setBusy] = useState(false);
   const { results } = useUserSearch(query);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -346,6 +358,7 @@ export function ChatInfoPanel({
   useEffect(() => {
     setName(chat.title);
     setQuery('');
+    setInvite('');
   }, [chat.id, chat.title]);
 
   const nonMembers = useMemo(
@@ -363,18 +376,37 @@ export function ChatInfoPanel({
     }
   }
 
+  async function makeInvite() {
+    setBusy(true);
+    try {
+      const res = await post<{ path: string }>(`/api/chats/${chat.id}/invite`);
+      const url = `${window.location.origin}${res.path}`;
+      setInvite(url);
+      navigator.clipboard?.writeText(url).catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Sheet title={isGroup ? 'Group info' : 'Contact info'} onClose={onClose}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 10,
+          marginBottom: 18,
+        }}
+      >
         <button
           type="button"
           onClick={() => (isGroup && isAdmin ? fileRef.current?.click() : undefined)}
-          title={isGroup && isAdmin ? 'Change group photo' : undefined}
         >
           <Avatar name={chat.title} src={chat.avatar} size={96} />
         </button>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 18, fontWeight: 600 }}>{chat.title}</div>
+          <div style={{ fontSize: 19, fontWeight: 500 }}>{chat.title}</div>
           <div className="hint">
             {isGroup
               ? `Group · ${chat.members.length} members`
@@ -425,16 +457,52 @@ export function ChatInfoPanel({
       ) : null}
 
       {isGroup ? (
-        <>
-          <div style={{ margin: '16px 0 6px', fontWeight: 600 }}>
-            {chat.members.length} members
+        <div className="field-row">
+          <label>Invite link</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input className="input" value={invite} readOnly placeholder="Create a link to share" />
+            <button type="button" className="btn" onClick={makeInvite} disabled={busy}>
+              <IconLink size={16} />
+            </button>
           </div>
+          <p className="hint" style={{ marginTop: 6 }}>
+            Anyone signed in to this Varnox who opens the link joins the group.
+          </p>
+        </div>
+      ) : null}
+
+      <div className="field-row">
+        <label>
+          <IconClock size={14} /> Disappearing messages
+        </label>
+        <div className="seg-row" style={{ padding: 0 }}>
+          {TIMERS.map((t) => (
+            <button
+              key={t.sec}
+              type="button"
+              className={`seg${(chat.disappearSec ?? 0) === t.sec ? ' on' : ''}`}
+              disabled={isGroup && !isAdmin}
+              onClick={() => onUpdate(chat.id, { disappearSec: t.sec })}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <p className="hint" style={{ marginTop: 6 }}>
+          New messages in this chat disappear for everyone after the chosen time.
+        </p>
+      </div>
+
+      {isGroup ? (
+        <>
+          <div className="list-label">{chat.members.length} members</div>
           {chat.memberProfiles.map((p) => (
             <div key={p.id} className="member-row">
               <Avatar name={p.displayName} src={p.avatar} size={42} />
               <span className="body">
                 <b>
-                  {p.displayName} {p.id === me.id ? ' (you)' : ''}
+                  {p.displayName}
+                  {p.id === me.id ? ' (you)' : ''}
                 </b>
                 <span>@{p.username}</span>
               </span>
@@ -442,7 +510,7 @@ export function ChatInfoPanel({
               {isAdmin && p.id !== me.id ? (
                 <button
                   type="button"
-                  className="icon-btn"
+                  className="header-btn"
                   title="Remove from group"
                   onClick={() => onUpdate(chat.id, { removeMembers: [p.id] })}
                 >
@@ -484,7 +552,11 @@ export function ChatInfoPanel({
         </>
       ) : (
         <div className="member-row">
-          <Avatar name={chat.peer?.displayName ?? chat.title} src={chat.peer?.avatar ?? null} size={42} />
+          <Avatar
+            name={chat.peer?.displayName ?? chat.title}
+            src={chat.peer?.avatar ?? null}
+            size={42}
+          />
           <span className="body">
             <b>{chat.peer?.displayName ?? chat.title}</b>
             <span>{chat.peer?.about || 'No about text'}</span>
@@ -492,15 +564,22 @@ export function ChatInfoPanel({
         </div>
       )}
 
-      <div style={{ marginTop: 20, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
+      <div className="list-label">Shared photos</div>
+      <MediaGallery convId={chat.id} />
+
+      <div style={{ marginTop: 20, borderTop: '1px solid var(--line)', paddingTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {!isGroup && chat.peer ? (
+          <button
+            type="button"
+            className={blocked ? 'btn ghost' : 'btn danger'}
+            onClick={() => onBlock(!blocked)}
+          >
+            {blocked ? 'Unblock contact' : 'Block contact'}
+          </button>
+        ) : null}
         <button type="button" className="btn danger" onClick={() => onLeave(chat.id)}>
           {isGroup ? 'Leave group' : 'Delete chat'}
         </button>
-        <p className="hint" style={{ marginTop: 8 }}>
-          {isGroup
-            ? 'Leaving removes the group from your chat list. Your messages stay for the other members.'
-            : 'The chat disappears from your list. The other person keeps their copy of the messages.'}
-        </p>
       </div>
     </Sheet>
   );

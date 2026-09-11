@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { post } from '@/lib/client';
 import { IconLogo } from './icons';
 
-export function AuthScreen() {
+export function AuthScreen({ next }: { next?: string }) {
   const router = useRouter();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('');
@@ -25,7 +25,7 @@ export function AuthScreen() {
       } else {
         await post('/api/auth/login', { username, password });
       }
-      router.replace('/chat');
+      router.replace(next && next.startsWith('/') ? next : '/chat');
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');

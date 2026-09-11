@@ -1,31 +1,60 @@
-import { getUser, type ChatSummary } from './db';
+import { getPresence, getSettings, getUser, type ChatSummary } from './db';
 import type { ChatRow, Conv, PublicUser } from './types';
 
 export type { ChatRow };
+
+/** A summary with no messages yet — used right after creating or joining a chat. */
+export function emptySummary(conv: Conv, at = Date.now()): ChatSummary {
+  return {
+    conv,
+    last: null,
+    unread: 0,
+    readAt: 0,
+    updatedAt: at,
+    pinned: false,
+    muted: false,
+    archived: false,
+  };
+}
 
 export function peerIdOf(conv: Conv, meId: string): string | null {
   if (conv.type !== 'direct') return null;
   return conv.members.find((m) => m !== meId) ?? null;
 }
 
-/** Build display rows, resolving member profiles (cached per request via getUser). */
+/**
+ * Resolve a member for display, applying their privacy settings:
+ * "nobody" hides last seen / photo from everyone else.
+ */
+export async function presentMember(id: string, viewerId: string): Promise<PublicUser | null> {
+  const [user, presence, settings] = await Promise.all([
+    getUser(id),
+    getPresence(id),
+    getSettings(id),
+  ]);
+  if (!user) return null;
+  const isSelf = id === viewerId;
+  const showLastSeen = isSelf || settings.privacy.lastSeen !== 'nobody';
+  const showPhoto = isSelf || settings.privacy.profilePhoto !== 'nobody';
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    about: user.about,
+    avatar: showPhoto ? user.avatar : null,
+    lastSeen: showLastSeen ? Math.max(user.lastSeen, presence) : 0,
+  };
+}
+
+/** Build a display row for the sidebar or a chat header. */
 export async function buildChatRow(meId: string, summary: ChatSummary): Promise<ChatRow> {
   const conv = summary.conv;
-  const profiles = (
-    await Promise.all(conv.members.map((id) => getUser(id)))
-  ).filter((u): u is NonNullable<typeof u> => Boolean(u));
-
-  const publicProfiles: PublicUser[] = profiles.map((u) => ({
-    id: u.id,
-    username: u.username,
-    displayName: u.displayName,
-    about: u.about,
-    avatar: u.avatar,
-    lastSeen: u.lastSeen,
-  }));
+  const members = (
+    await Promise.all(conv.members.map((id) => presentMember(id, meId)))
+  ).filter((u): u is PublicUser => Boolean(u));
 
   const peerUserId = peerIdOf(conv, meId);
-  const peer = peerUserId ? publicProfiles.find((p) => p.id === peerUserId) ?? null : null;
+  const peer = peerUserId ? members.find((p) => p.id === peerUserId) ?? null : null;
 
   return {
     id: conv.id,
@@ -36,11 +65,15 @@ export async function buildChatRow(meId: string, summary: ChatSummary): Promise<
     admins: conv.admins,
     createdBy: conv.createdBy,
     createdAt: conv.createdAt,
+    disappearSec: conv.disappearSec ?? 0,
     peer,
-    memberProfiles: publicProfiles,
+    memberProfiles: members,
     last: summary.last,
     unread: summary.unread,
     updatedAt: summary.updatedAt,
     readAt: summary.readAt,
+    pinned: summary.pinned,
+    muted: summary.muted,
+    archived: summary.archived,
   };
 }

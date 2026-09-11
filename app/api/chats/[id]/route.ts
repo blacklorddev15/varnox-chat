@@ -1,7 +1,7 @@
 import { requireUser } from '@/lib/auth';
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
 import { chatSummaries, getConv, getConvReads, getUser } from '@/lib/db';
-import { buildChatRow } from '@/lib/present';
+import { buildChatRow, emptySummary } from '@/lib/present';
 import { hideConvFor, refreshConv } from '@/lib/service';
 
 export const dynamic = 'force-dynamic';
@@ -22,13 +22,8 @@ export async function GET(_req: Request, ctx: Ctx) {
     if (!conv.members.includes(me.id)) return bad('You are not in this chat', 403);
 
     const summaries = await chatSummaries(me.id);
-    const summary = summaries.find((s) => s.conv.id === conv.id) ?? {
-      conv,
-      last: null,
-      unread: 0,
-      readAt: 0,
-      updatedAt: conv.createdAt,
-    };
+    const summary =
+      summaries.find((s) => s.conv.id === conv.id) ?? emptySummary(conv, conv.createdAt);
     const reads = await getConvReads(conv.id);
     return ok({ chat: await buildChatRow(me.id, summary), reads });
   });
@@ -39,7 +34,11 @@ type PatchBody = {
   avatar?: string | null;
   addMembers?: string[];
   removeMembers?: string[];
+  /** disappearing messages: 0 = off, otherwise seconds */
+  disappearSec?: number;
 };
+
+const DISAPPEAR_CHOICES = [0, 86_400, 604_800, 7_776_000];
 
 export async function PATCH(req: Request, ctx: Ctx) {
   return handle(async () => {
@@ -91,10 +90,21 @@ export async function PATCH(req: Request, ctx: Ctx) {
       }
     }
 
+    let disappearSec = conv.disappearSec ?? 0;
+    if (body.disappearSec !== undefined) {
+      if (isGroup && !isAdmin) {
+        return bad('Only group admins can change disappearing messages', 403);
+      }
+      const wanted = Math.round(Number(body.disappearSec));
+      if (!DISAPPEAR_CHOICES.includes(wanted)) return bad('Unsupported timer value');
+      disappearSec = wanted;
+    }
+
     const next = {
       ...conv,
       name,
       avatar,
+      disappearSec,
       members: [...members],
       admins: conv.admins.filter((a) => members.has(a)),
     };

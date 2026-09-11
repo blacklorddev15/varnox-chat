@@ -1,6 +1,6 @@
 import { requireUser } from '@/lib/auth';
 import { bad, handle, ok, readJsonBody } from '@/lib/api';
-import { getConv, markRead } from '@/lib/db';
+import { getConv, getSettings, markRead } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +21,12 @@ export async function POST(req: Request, ctx: Ctx) {
     } catch {
       /* empty body is fine */
     }
-    await markRead(me.id, id, Math.min(at, Date.now()));
-    return ok({ read: true, at });
+
+    // Users who hide their read receipts still get their own unread badge cleared,
+    // but no visible receipt is published for others.
+    const settings = await getSettings(me.id);
+    const stamped = Math.min(at, Date.now());
+    await markRead(me.id, id, stamped, { shareReceipt: settings.privacy.readReceipts });
+    return ok({ read: true, at: stamped, shared: settings.privacy.readReceipts });
   });
 }
