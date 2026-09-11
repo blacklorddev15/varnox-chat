@@ -1,8 +1,13 @@
 # Varnox
 
-A messenger web app: one-to-one chats and group conversations, photo sharing, replies,
-message editing and deletion, read receipts and unread badges, in a two-pane layout that
-works on desktop and phone. Installable as a PWA.
+A messenger web app: one-to-one chats and group conversations, voice notes, photos and
+documents, reactions, replies, forwarding, starred messages, disappearing timers, read
+receipts and privacy controls — in a two-pane layout that works on desktop and phone.
+Installable as a PWA.
+
+Varnox is its own product with its own name, mark and palette. It deliberately follows the
+familiar conventions of a mainstream messenger, but it does not copy anyone's logo, artwork or
+trade dress.
 
 Live: https://varnox-chat.vercel.app
 
@@ -11,13 +16,30 @@ Live: https://varnox-chat.vercel.app
 - **Accounts** — register and sign in with a username and password. Passwords are hashed with
   scrypt (per-user salt); the session is an HMAC-signed, HttpOnly, SameSite=Lax cookie.
 - **1:1 chats** — find people by username, start a chat, message back and forth.
-- **Groups** — create a group with a name and members, group photo, admin roles, add and
-  remove members, leave the group. A system message records group creation.
+- **Groups** — create a group with a name and members, group photo, admin roles, add and remove
+  members, leave, and **invite links** that anyone signed in can open to join.
 - **Messaging** — text, emoji picker, photo attachments (compressed in the browser before
   upload), reply-to, edit and delete your own messages, day separators, message grouping.
-- **Status** — unread badges, last-message previews, tick states: one tick sent, two ticks
-  delivered, blue ticks read.
-- **Interface** — light and dark themes, remembered per device; responsive; installable.
+- **Voice notes** — record in the browser and send; the player has a seekable waveform and
+  a clock.
+- **Documents** — send any file type with its name and size, downloadable from the bubble.
+- **Reactions** — long-press/hover a bubble and pick an emoji; chips show who reacted and
+  tapping yours removes it.
+- **Forwarding** — pass a message on to one or several chats; forwarded copies are labelled.
+- **Multi-select** — select several messages to star, forward, copy or delete together.
+- **Starred messages** — keep a message and find it again from Settings.
+- **Search** — search box in the sidebar filters chats; the menu searches message text across
+  every conversation, and each chat has its own in-chat search.
+- **Chat management** — pin, mute and archive chats, with All / Unread / Groups filters.
+- **Disappearing messages** — per-chat timer of 24 hours, 7 days or 90 days.
+- **Presence** — typing indicator in the chat header, and an online / last-seen line.
+- **Status** — unread badges, last-message previews with a type glyph, tick states: one tick
+  sent, two ticks delivered, blue ticks read.
+- **Message info** — per-message delivered/read breakdown for every member.
+- **Notifications** — browser notification and a chime when a message lands in a background tab.
+- **Privacy** — last seen, profile photo and read receipts can each be limited or switched off,
+  enforced on the server; block a contact to close the chat in both directions.
+- **Interface** — light and dark themes, five chat wallpapers, responsive, installable PWA.
 
 ## Architecture
 
@@ -104,7 +126,10 @@ npm run dev                  # http://localhost:3000
   last-seen time, so it can over-report if they were online without receiving the message.
 - **Chat history is capped per fetch** (45 messages per page, with "load older" paging) and
   large conversations cost one `list()` page per chunk of history.
-- **Photos are public** (unguessable URL, but not access-controlled). Serving them through an
-  authenticated proxy is the next step.
-- There is no push notification, voice/video calling, message search across conversations, or
-  end-to-end encryption.
+- **Uploads are capped at 4 MB** because Vercel functions reject larger request bodies.
+- **Attachments are public** (unguessable URL, but not access-controlled). Serving them through
+  an authenticated proxy is the next step.
+- **Not implemented yet:** voice and video calls, status/stories, end-to-end encryption,
+  multi-device linking, and contact/address-book sync.
+- **Search is bounded** — it scans the most recent messages of your 12 most recent chats rather
+  than every message ever sent.
