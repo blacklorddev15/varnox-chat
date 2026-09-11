@@ -54,7 +54,10 @@ export async function putJson(pathname: string, value: unknown): Promise<string>
     access: 'public',
     contentType: 'application/json',
     addRandomSuffix: false,
-    allowOverwrite: true,
+    // Every caller passes a versionKey()-suffixed path, so a repeat write can only
+    // mean a genuine bug. Refusing the overwrite turns a silent stale read into a
+    // loud error, which is what this design depends on.
+    allowOverwrite: false,
     cacheControlMaxAge: 60,
   });
   return res.url;
@@ -69,7 +72,7 @@ export async function putBinary(
     access: 'public',
     contentType,
     addRandomSuffix: true,
-    allowOverwrite: true,
+    allowOverwrite: false,
     cacheControlMaxAge: 31536000,
   });
   return res.url;
