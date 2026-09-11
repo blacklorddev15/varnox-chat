@@ -1,6 +1,7 @@
 import {
   ROOT,
   cached,
+  del,
   invalidate,
   listAll,
   listPrefix,
@@ -11,6 +12,7 @@ import {
   sortNewest,
   versionKey,
 } from './blob';
+import { looksLikePhone, phoneKey } from './phone';
 import type {
   ChatPrefs,
   Conv,
@@ -38,6 +40,7 @@ const msgPrefix = (convId: string) => `${ROOT}/m/${convId}`;
 const opPrefix = (convId: string) => `${ROOT}/mo/${convId}`;
 const readMapPrefix = (userId: string) => `${ROOT}/ur/${userId}`;
 const convReadPrefix = (convId: string) => `${ROOT}/r/${convId}`;
+const phoneIndexPrefix = (digits: string) => `${ROOT}/ph/${digits}`;
 const settingsPrefix = (userId: string) => `${ROOT}/set/${userId}`;
 const reactionPrefix = (convId: string) => `${ROOT}/rx/${convId}`;
 const starPrefix = (userId: string) => `${ROOT}/star/${userId}`;
@@ -95,26 +98,58 @@ export async function reserveUsername(username: string, userId: string): Promise
   });
 }
 
+/** Find people by username prefix, or by an exact phone number. */
 export async function searchUsers(term: string, excludeId: string): Promise<PublicUser[]> {
-  const q = term.trim().toLowerCase();
-  if (q.length < 1) return [];
-  const { blobs } = await listPrefix(nameIndexPrefix(q), 12);
-  const ids: string[] = [];
+  const raw = term.trim();
+  if (raw.length < 1) return [];
+
+  const ids = new Set<string>();
+  const { blobs } = await listPrefix(nameIndexPrefix(raw.toLowerCase()), 12);
   for (const b of blobs) {
     const idx = await readJson<{ userId: string }>(b.url);
-    if (idx?.userId && idx.userId !== excludeId) ids.push(idx.userId);
+    if (idx?.userId) ids.add(idx.userId);
   }
-  const users = await Promise.all(ids.slice(0, 12).map((id) => getUser(id)));
+
+  if (looksLikePhone(raw)) {
+    const byPhone = await getUserByPhone(raw);
+    if (byPhone) ids.add(byPhone.id);
+  }
+
+  ids.delete(excludeId);
+  const users = await Promise.all([...ids].slice(0, 12).map((id) => getUser(id)));
   return users
     .filter((u): u is User => Boolean(u))
     .map((u) => ({
       id: u.id,
       username: u.username,
+      phone: u.phone ?? null,
       displayName: u.displayName,
       about: u.about,
       avatar: u.avatar,
       lastSeen: u.lastSeen,
     }));
+}
+
+export async function getUserByPhone(phone: string): Promise<User | null> {
+  const idx = await newestJson<{ userId: string }>(phoneIndexPrefix(phoneKey(phone)));
+  if (!idx?.userId) return null;
+  return getUser(idx.userId);
+}
+
+export async function phoneTaken(phone: string): Promise<boolean> {
+  const { blobs } = await listPrefix(phoneIndexPrefix(phoneKey(phone)), 1);
+  return blobs.length > 0;
+}
+
+export async function reservePhone(phone: string, userId: string): Promise<void> {
+  await putJson(`${phoneIndexPrefix(phoneKey(phone))}/${versionKey()}.json`, { userId, phone });
+}
+
+/** Release a number so it can be claimed by another account. */
+export async function releasePhone(phone: string): Promise<void> {
+  const key = phoneKey(phone);
+  const { blobs } = await listPrefix(phoneIndexPrefix(key), 100);
+  await Promise.all(blobs.map((b) => del(b.url).catch(() => undefined)));
 }
 
 /** conversations ----------------------------------------------------------- */

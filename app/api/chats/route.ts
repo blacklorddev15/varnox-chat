@@ -39,10 +39,13 @@ export async function POST(req: Request) {
     }
 
     if (body.type === 'group') {
-      const name = clean(body.name, 60);
-      const members = Array.isArray(body.members) ? body.members.slice(0, 250).map(String) : [];
-      if (!name) return bad('Give the group a name');
-      if (members.length < 1) return bad('Add at least one member');
+      const name = clean(body.name, 60) || 'New group';
+      const wanted = Array.isArray(body.members) ? body.members.slice(0, 250).map(String) : [];
+      // A group may be created with nobody else in it, then filled later.
+      const resolved = await Promise.all(wanted.map((id) => getUser(id)));
+      const members = resolved
+        .filter((u): u is NonNullable<typeof u> => Boolean(u) && u!.id !== me.id)
+        .map((u) => u.id);
       const conv = await createGroupConv(me, name, members);
       return ok({ chat: await buildChatRow(me.id, emptySummary(conv)) }, 201);
     }

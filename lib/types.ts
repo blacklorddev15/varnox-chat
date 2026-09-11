@@ -3,6 +3,8 @@
 export type User = {
   id: string;
   username: string;
+  /** Canonical "+<digits>" login identifier. Null only for accounts made before phone login existed. */
+  phone: string | null;
   displayName: string;
   about: string;
   avatar: string | null;
@@ -15,6 +17,7 @@ export type User = {
 export type PublicUser = {
   id: string;
   username: string;
+  phone: string | null;
   displayName: string;
   about: string;
   avatar: string | null;

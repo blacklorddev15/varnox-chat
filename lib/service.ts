@@ -76,6 +76,19 @@ export async function createGroupConv(
   };
   await saveMessage(system);
 
+  // A group can be created with nobody else in it; tell the creator how to fix that.
+  if (members.length === 1) {
+    await saveMessage({
+      id: newId('m'),
+      convId: conv.id,
+      senderId: me.id,
+      senderName: me.displayName,
+      at: now + 1,
+      type: 'system',
+      text: 'You are the only member. Add people from Group info, or share the invite link.',
+    });
+  }
+
   await Promise.all(
     conv.members.map((uid) =>
       putMarker({

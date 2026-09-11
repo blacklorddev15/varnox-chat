@@ -1,6 +1,7 @@
 import { currentUser, publicUser, requireUser } from '@/lib/auth';
-import { clean, handle, ok, readJsonBody } from '@/lib/api';
-import { saveUser } from '@/lib/db';
+import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
+import { getUserByPhone, releasePhone, reservePhone, saveUser } from '@/lib/db';
+import { normalisePhone } from '@/lib/phone';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +15,12 @@ export async function GET() {
 export async function PATCH(req: Request) {
   return handle(async () => {
     const me = await requireUser();
-    const body = await readJsonBody<{ displayName?: string; about?: string; avatar?: string | null }>(req);
+    const body = await readJsonBody<{
+      displayName?: string;
+      about?: string;
+      avatar?: string | null;
+      phone?: string;
+    }>(req);
 
     const next = { ...me, lastSeen: Date.now() };
     if (body.displayName !== undefined) {
@@ -25,6 +31,22 @@ export async function PATCH(req: Request) {
     if (body.avatar !== undefined) {
       next.avatar = body.avatar ? clean(body.avatar, 500) : null;
     }
+
+    if (body.phone !== undefined && clean(body.phone, 30) !== (me.phone ?? '')) {
+      const raw = clean(body.phone, 30);
+      const phone = normalisePhone(raw);
+      if (!phone) return bad('Enter a valid phone number including country code');
+      if (phone !== me.phone) {
+        const holder = await getUserByPhone(phone);
+        if (holder && holder.id !== me.id) {
+          return bad('That phone number is already registered', 409);
+        }
+        if (me.phone) await releasePhone(me.phone);
+        await reservePhone(phone, me.id);
+        next.phone = phone;
+      }
+    }
+
     await saveUser(next);
     return ok({ user: publicUser(next) });
   });

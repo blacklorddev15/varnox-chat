@@ -39,6 +39,7 @@ export async function presentMember(id: string, viewerId: string): Promise<Publi
   return {
     id: user.id,
     username: user.username,
+    phone: user.phone ?? null,
     displayName: user.displayName,
     about: user.about,
     avatar: showPhoto ? user.avatar : null,

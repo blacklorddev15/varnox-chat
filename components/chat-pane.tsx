@@ -17,6 +17,7 @@ import {
   IconDoubleCheck,
   IconEdit,
   IconForward,
+  IconGroup,
   IconInfo,
   IconLogo,
   IconMoon,
@@ -232,6 +233,12 @@ export function ChatPane({
       {disappearSec ? (
         <div className="sys-chip" style={{ margin: '8px auto 0' }}>
           <IconClock size={13} /> Disappearing messages · {disappearLabel(disappearSec)}
+        </div>
+      ) : null}
+
+      {chat.type === 'group' && chat.members.length === 1 ? (
+        <div className="sys-chip" style={{ margin: '8px auto 0' }}>
+          <IconGroup size={13} /> You are the only member — add people or share the invite link
         </div>
       ) : null}
 

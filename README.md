@@ -111,13 +111,24 @@ npm run dev                  # http://localhost:3000
 | `POST` | `/api/auth/login` | Sign in |
 | `POST` | `/api/auth/logout` | Sign out |
 | `GET` / `PATCH` | `/api/me` | Read or update your profile |
-| `GET` | `/api/users?q=` | Find people by username |
+| `GET` | `/api/users?q=` | Find people by username (blocked accounts are hidden) |
+| `GET` / `PATCH` | `/api/settings` | Wallpaper, notifications, privacy, chat prefs, blocked list |
+| `POST` | `/api/presence` | Presence heartbeat, returns peer presence |
+| `GET` | `/api/search?q=` | Search message text across your chats |
 | `GET` / `POST` | `/api/chats` | List conversations / start a chat or group |
-| `GET` / `PATCH` / `DELETE` | `/api/chats/[id]` | Details / rename, photo, members / leave |
-| `GET` / `POST` | `/api/chats/[id]/messages` | History (`?since=`, `?cursor=`, `?limit=`) / send |
-| `POST` | `/api/chats/[id]/read` | Mark read |
+| `GET` / `PATCH` / `DELETE` | `/api/chats/[id]` | Details / rename, photo, members, disappearing timer / leave |
+| `GET` / `POST` | `/api/chats/[id]/messages` | History (`?since=`, `?cursor=`, `?limit=`) with reactions + typing / send |
+| `POST` | `/api/chats/[id]/read` | Mark read (respects the read-receipts setting) |
+| `POST` | `/api/chats/[id]/typing` | Typing ping |
+| `POST` | `/api/chats/[id]/invite` | Create a group invite link |
+| `POST` | `/api/join` | Join a group with an invite code |
 | `PATCH` / `DELETE` | `/api/messages/[id]` | Edit / delete your own message |
-| `POST` | `/api/upload` | Upload a photo |
+| `POST` | `/api/messages/[id]/react` | Add or clear an emoji reaction |
+| `POST` / `DELETE` | `/api/messages/[id]/star` | Star / unstar a message |
+| `GET` | `/api/starred` | Starred messages |
+| `POST` | `/api/messages/bulk` | Star, unstar or delete several messages at once |
+| `POST` | `/api/messages/forward` | Forward messages into other chats |
+| `POST` | `/api/upload` | Upload a photo, voice note or document |
 
 ## Known limits
 

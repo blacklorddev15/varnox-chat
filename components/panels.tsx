@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, post, uploadImage } from '@/lib/client';
 import type { ChatRow, PublicUser } from '@/lib/types';
 import { presence } from '@/lib/format';
+import { formatPhone } from '@/lib/phone';
 import { Avatar } from './avatar';
 import { MediaGallery } from './overlays';
 import { IconCheck, IconClock, IconClose, IconLink, IconSearch } from './icons';
@@ -33,6 +34,11 @@ function Sheet({
       </div>
     </div>
   );
+}
+
+/** Who to show for a person: their formatted phone, else their handle. */
+function label(user: { phone?: string | null; username: string }): string {
+  return formatPhone(user.phone ?? null) || `@${user.username}`;
 }
 
 function useUserSearch(query: string) {
@@ -84,14 +90,15 @@ export function NewChatPanel({
           autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search people by username"
+          placeholder="Search by phone number"
+          inputMode="tel"
         />
       </div>
 
       {!query.trim() ? (
         <p className="hint">
-          Signed in as <b>@{me.username}</b>. Type a username to find someone — if they register at
-          this same address with the username you type, you will find each other here.
+          You are signed in as <b>{label(me)}</b>. Type someone else&apos;s phone number to find
+          them — both sides need an account here first.
         </p>
       ) : results.length === 0 ? (
         <p className="hint">{searching ? 'Searching…' : `No one found for “${query.trim()}”.`}</p>
@@ -102,7 +109,7 @@ export function NewChatPanel({
             <span className="body">
               <b>{user.displayName}</b>
               <span>
-                @{user.username} · {presence(user.lastSeen)}
+                {label(user)} · {presence(user.lastSeen)}
               </span>
             </span>
           </button>
@@ -121,7 +128,7 @@ export function NewGroupPanel({
   onClose: () => void;
   onCreate: (name: string, memberIds: string[]) => void;
 }) {
-  const [name, setName] = useState('');
+  const [name, setName] = useState('New group');
   const [query, setQuery] = useState('');
   const [picked, setPicked] = useState<PublicUser[]>([]);
   const { results } = useUserSearch(query);
@@ -144,10 +151,12 @@ export function NewGroupPanel({
           <button
             type="button"
             className="btn"
-            disabled={!name.trim() || picked.length === 0}
+            disabled={!name.trim()}
             onClick={() => onCreate(name.trim(), picked.map((p) => p.id))}
           >
-            Create group
+            {picked.length === 0
+              ? 'Create group on my own'
+              : `Create group with ${picked.length + 1} members`}
           </button>
         </>
       }
@@ -179,7 +188,12 @@ export function NewGroupPanel({
 
       <div className="search-box" style={{ margin: '10px 0' }}>
         <IconSearch size={18} />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Add members" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Add members by phone number"
+          inputMode="tel"
+        />
       </div>
 
       {query.trim() && results.length === 0 ? (
@@ -193,7 +207,7 @@ export function NewGroupPanel({
             <Avatar name={user.displayName} src={user.avatar} size={44} />
             <span className="body">
               <b>{user.displayName}</b>
-              <span>@{user.username}</span>
+              <span>{label(user)}</span>
             </span>
             <span className={`check${on ? ' on' : ''}`}>{on ? <IconCheck size={13} /> : null}</span>
           </button>
@@ -202,8 +216,9 @@ export function NewGroupPanel({
 
       {!query.trim() ? (
         <p className="hint" style={{ marginTop: 8 }}>
-          You become the group admin. Once the group exists you can share an invite link from the
-          group info screen.
+          You can create the group now with nobody else in it, then add people later — by their
+          phone number from Group info, or by sharing the invite link so they join themselves. You
+          are signed in as <b>{label(me)}</b> and become the group admin.
         </p>
       ) : null}
     </Sheet>
@@ -221,6 +236,7 @@ export function ProfilePanel({
 }) {
   const [displayName, setDisplayName] = useState(me.displayName);
   const [about, setAbout] = useState(me.about);
+  const [phone, setPhone] = useState(me.phone ?? '');
   const [avatar, setAvatar] = useState<string | null>(me.avatar);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -252,7 +268,7 @@ export function ProfilePanel({
             type="button"
             className="btn"
             disabled={busy}
-            onClick={() => onSave({ displayName, about, avatar })}
+            onClick={() => onSave({ displayName, about, avatar, phone })}
           >
             Save
           </button>
@@ -278,7 +294,7 @@ export function ProfilePanel({
             </button>
           ) : null}
           <div className="hint" style={{ marginTop: 6 }}>
-            @{me.username}
+            {formatPhone(me.phone) || `@${me.username}`}
           </div>
         </div>
         <input
@@ -295,7 +311,7 @@ export function ProfilePanel({
       </div>
 
       <div className="field-row">
-        <label htmlFor="display">Display name</label>
+        <label htmlFor="display">Your name</label>
         <input
           id="display"
           className="input"
@@ -303,6 +319,23 @@ export function ProfilePanel({
           onChange={(e) => setDisplayName(e.target.value)}
           maxLength={40}
         />
+      </div>
+
+      <div className="field-row">
+        <label htmlFor="phone">Phone number (your login)</label>
+        <input
+          id="phone"
+          className="input"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="+65 9123 4567"
+          inputMode="tel"
+          autoComplete="tel"
+        />
+        <p className="hint" style={{ marginTop: 6 }}>
+          Include the country code. This is the number you sign in with and the one other people use
+          to find you.
+        </p>
       </div>
 
       <div className="field-row">
@@ -409,8 +442,8 @@ export function ChatInfoPanel({
           <div style={{ fontSize: 19, fontWeight: 500 }}>{chat.title}</div>
           <div className="hint">
             {isGroup
-              ? `Group · ${chat.members.length} members`
-              : `@${chat.peer?.username ?? 'unknown'} · ${presence(chat.peer?.lastSeen ?? 0)}`}
+              ? `Group · ${chat.members.length} member${chat.members.length === 1 ? '' : 's'}`
+              : `${chat.peer ? label(chat.peer) : 'unknown'} · ${presence(chat.peer?.lastSeen ?? 0)}`}
           </div>
         </div>
         {isGroup && isAdmin ? (
@@ -495,7 +528,9 @@ export function ChatInfoPanel({
 
       {isGroup ? (
         <>
-          <div className="list-label">{chat.members.length} members</div>
+          <div className="list-label">
+            {chat.members.length} member{chat.members.length === 1 ? '' : 's'}
+          </div>
           {chat.memberProfiles.map((p) => (
             <div key={p.id} className="member-row">
               <Avatar name={p.displayName} src={p.avatar} size={42} />
@@ -504,7 +539,7 @@ export function ChatInfoPanel({
                   {p.displayName}
                   {p.id === me.id ? ' (you)' : ''}
                 </b>
-                <span>@{p.username}</span>
+                <span>{label(p)}</span>
               </span>
               {chat.admins.includes(p.id) ? <span className="tag">admin</span> : null}
               {isAdmin && p.id !== me.id ? (
@@ -525,7 +560,8 @@ export function ChatInfoPanel({
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Add a member by username"
+              placeholder="Add someone by phone number"
+              inputMode="tel"
             />
           </div>
           {query.trim() && nonMembers.length === 0 ? (
@@ -544,7 +580,7 @@ export function ChatInfoPanel({
               <Avatar name={u.displayName} src={u.avatar} size={42} />
               <span className="body">
                 <b>{u.displayName}</b>
-                <span>@{u.username}</span>
+                <span>{label(u)}</span>
               </span>
               <span className="tag">Add</span>
             </button>
@@ -559,6 +595,7 @@ export function ChatInfoPanel({
           />
           <span className="body">
             <b>{chat.peer?.displayName ?? chat.title}</b>
+            <span>{chat.peer ? label(chat.peer) : 'No number on file'}</span>
             <span>{chat.peer?.about || 'No about text'}</span>
           </span>
         </div>
@@ -567,7 +604,16 @@ export function ChatInfoPanel({
       <div className="list-label">Shared photos</div>
       <MediaGallery convId={chat.id} />
 
-      <div style={{ marginTop: 20, borderTop: '1px solid var(--line)', paddingTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+      <div
+        style={{
+          marginTop: 20,
+          borderTop: '1px solid var(--line)',
+          paddingTop: 14,
+          display: 'flex',
+          gap: 10,
+          flexWrap: 'wrap',
+        }}
+      >
         {!isGroup && chat.peer ? (
           <button
             type="button"

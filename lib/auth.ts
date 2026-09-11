@@ -79,11 +79,17 @@ export function publicUser(u: User): PublicUser {
   return {
     id: u.id,
     username: u.username,
+    phone: u.phone ?? null,
     displayName: u.displayName,
     about: u.about,
     avatar: u.avatar,
     lastSeen: u.lastSeen,
   };
+}
+
+/** Derive a stable-looking handle for accounts that register with only a phone number. */
+export function handleFromPhone(phone: string): string {
+  return `vx${phone.replace(/[^\d]/g, '').slice(-8)}`;
 }
 
 /** Server-sent session identity used by the API routes. */

@@ -8,7 +8,7 @@ import { IconLogo } from './icons';
 export function AuthScreen({ next }: { next?: string }) {
   const router = useRouter();
   const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [username, setUsername] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -21,9 +21,9 @@ export function AuthScreen({ next }: { next?: string }) {
     setError('');
     try {
       if (mode === 'register') {
-        await post('/api/auth/register', { username, displayName, password });
+        await post('/api/auth/register', { phone: identifier, displayName, password });
       } else {
-        await post('/api/auth/login', { username, password });
+        await post('/api/auth/login', { identifier, password });
       }
       router.replace(next && next.startsWith('/') ? next : '/chat');
       router.refresh();
@@ -40,28 +40,35 @@ export function AuthScreen({ next }: { next?: string }) {
         <h1>{mode === 'login' ? 'Welcome back to Varnox' : 'Create your Varnox account'}</h1>
         <p className="sub">
           {mode === 'login'
-            ? 'Sign in to pick up your conversations, groups and photos.'
-            : 'Pick a username, then find people by username to start chatting.'}
+            ? 'Sign in with your phone number to pick up your chats, groups and voice notes.'
+            : 'Register with your phone number, then find people by their number to start chatting.'}
         </p>
 
         <form onSubmit={submit}>
           <div className="field-row">
-            <label htmlFor="username">Username</label>
+            <label htmlFor="identifier">
+              {mode === 'login' ? 'Phone number' : 'Phone number'}
+            </label>
             <input
-              id="username"
+              id="identifier"
               className="input"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="yourname"
-              autoComplete="username"
-              autoCapitalize="none"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              placeholder="+65 9123 4567"
+              autoComplete="tel"
+              inputMode="tel"
               required
             />
+            {mode === 'login' ? (
+              <p className="hint" style={{ marginTop: 6 }}>
+                Accounts created earlier can still sign in with their username here.
+              </p>
+            ) : null}
           </div>
 
           {mode === 'register' ? (
             <div className="field-row">
-              <label htmlFor="displayName">Display name</label>
+              <label htmlFor="displayName">Your name</label>
               <input
                 id="displayName"
                 className="input"
@@ -112,8 +119,9 @@ export function AuthScreen({ next }: { next?: string }) {
         </div>
 
         <p className="hint" style={{ marginTop: 16 }}>
-          Your messages are stored on your own Varnox server. Nothing here is shared with any other
-          messenger.
+          Include your country code, for example <b>+65 9123 4567</b>. No SMS is sent — the number is
+          your login ID, protected by the password you choose. Messages stay on your own Varnox
+          server and are not shared with any other messenger.
         </p>
       </div>
     </div>

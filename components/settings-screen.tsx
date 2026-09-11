@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { PrivacyWho, PublicUser, UserSettings, WallpaperId } from '@/lib/types';
+import { formatPhone } from '@/lib/phone';
 import { Avatar } from './avatar';
 import {
   IconBack,
@@ -102,6 +103,7 @@ export function SettingsScreen({
               <Avatar name={me.displayName} src={me.avatar} size={76} />
               <span style={{ textAlign: 'left', flex: 1 }}>
                 <div className="nm">{me.displayName}</div>
+                <div className="ab">{formatPhone(me.phone) || `@${me.username}`}</div>
                 <div className="ab">{me.about || 'Hey there! I am using Varnox.'}</div>
               </span>
             </button>
@@ -114,7 +116,9 @@ export function SettingsScreen({
                 </span>
                 <span className="txt">
                   Profile
-                  <small>@{me.username} · name, photo and about</small>
+                  <small>
+                    {formatPhone(me.phone) || `@${me.username}`} · name, photo, number and about
+                  </small>
                 </span>
               </button>
               <button type="button" className="settings-row" onClick={() => setSection('privacy')}>

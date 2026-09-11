@@ -1,4 +1,6 @@
-import { list, put, type ListBlobResultBlob } from '@vercel/blob';
+import { del, list, put, type ListBlobResultBlob } from '@vercel/blob';
+
+export { del };
 
 /**
  * Low-level storage helpers.

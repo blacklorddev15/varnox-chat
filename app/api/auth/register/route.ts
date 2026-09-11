@@ -1,12 +1,20 @@
-import { currentUser, hashPassword, publicUser, setSessionCookie } from '@/lib/auth';
+import {
+  currentUser,
+  handleFromPhone,
+  hashPassword,
+  publicUser,
+  setSessionCookie,
+} from '@/lib/auth';
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
-import { getUserByUsername, reserveUsername, saveUser, usernameTaken } from '@/lib/db';
-import { newId } from '@/lib/blob';
+import { getUserByUsername, phoneTaken, reservePhone, reserveUsername, saveUser, usernameTaken } from '@/lib/db';
+import { rand, newId } from '@/lib/blob';
+import { formatPhone, normalisePhone } from '@/lib/phone';
 import type { User } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
 type Body = {
+  phone?: string;
   username?: string;
   displayName?: string;
   password?: string;
@@ -15,23 +23,40 @@ type Body = {
 export async function POST(req: Request) {
   return handle(async () => {
     const body = await readJsonBody<Body>(req);
-    const username = clean(body.username, 24).toLowerCase().replace(/\s+/g, '');
-    const displayName = clean(body.displayName, 40) || username;
     const password = String(body.password ?? '');
-
-    if (!/^[a-z0-9._]{3,24}$/.test(username)) {
-      return bad('Username must be 3-24 characters: letters, numbers, dot or underscore');
-    }
     if (password.length < 6) return bad('Password must be at least 6 characters');
-    if (await usernameTaken(username)) return bad('That username is already taken', 409);
 
-    const existing = await getUserByUsername(username);
-    if (existing) return bad('That username is already taken', 409);
+    const rawPhone = clean(body.phone, 30);
+    const phone = rawPhone ? normalisePhone(rawPhone) : null;
+    if (rawPhone && !phone) {
+      return bad('Enter a valid phone number including country code, e.g. +65 9123 4567');
+    }
+    if (phone && (await phoneTaken(phone))) {
+      return bad('That phone number is already registered', 409);
+    }
+
+    let wanted = clean(body.username, 24).toLowerCase().replace(/\s+/g, '');
+    if (!wanted && phone) wanted = handleFromPhone(phone);
+    if (!wanted) return bad('Enter a phone number to register');
+    if (!/^[a-z0-9._]{3,24}$/.test(wanted)) {
+      return bad('Handle must be 3-24 characters: letters, numbers, dot or underscore');
+    }
+    if (await usernameTaken(wanted) || (await getUserByUsername(wanted))) {
+      let candidate = '';
+      for (let i = 0; i < 5; i++) {
+        candidate = `${wanted.slice(0, 18)}${rand(3)}`.slice(0, 24);
+        if (!(await usernameTaken(candidate)) && !(await getUserByUsername(candidate))) break;
+        candidate = '';
+      }
+      if (!candidate) return bad('That handle is already taken', 409);
+      wanted = candidate;
+    }
 
     const user: User = {
       id: newId('u'),
-      username,
-      displayName,
+      username: wanted,
+      phone,
+      displayName: clean(body.displayName, 40) || (phone ? formatPhone(phone) : wanted),
       about: 'Hey there! I am using Varnox.',
       avatar: null,
       pwHash: hashPassword(password),
@@ -39,7 +64,8 @@ export async function POST(req: Request) {
       lastSeen: Date.now(),
     };
 
-    await reserveUsername(username, user.id);
+    if (phone) await reservePhone(phone, user.id);
+    await reserveUsername(wanted, user.id);
     await saveUser(user);
     await setSessionCookie(user.id);
 

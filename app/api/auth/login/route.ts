@@ -1,18 +1,30 @@
 import { publicUser, setSessionCookie, verifyPassword } from '@/lib/auth';
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
-import { getUserByUsername, saveUser } from '@/lib/db';
+import { getUserByPhone, getUserByUsername, saveUser } from '@/lib/db';
+import { normalisePhone } from '@/lib/phone';
 
 export const dynamic = 'force-dynamic';
 
+type Body = {
+  /** phone number or handle */
+  identifier?: string;
+  /** older clients sent this field */
+  username?: string;
+  password?: string;
+};
+
 export async function POST(req: Request) {
   return handle(async () => {
-    const body = await readJsonBody<{ username?: string; password?: string }>(req);
-    const username = clean(body.username, 24).toLowerCase();
+    const body = await readJsonBody<Body>(req);
+    const raw = clean(body.identifier ?? body.username, 40);
     const password = String(body.password ?? '');
+    if (!raw) return bad('Enter your phone number');
 
-    const user = await getUserByUsername(username);
+    const phone = normalisePhone(raw);
+    const user = (phone ? await getUserByPhone(phone) : null) ?? (await getUserByUsername(raw));
+
     if (!user || !verifyPassword(password, user.pwHash)) {
-      return bad('Incorrect username or password', 401);
+      return bad('Incorrect phone number or password', 401);
     }
 
     const fresh = { ...user, lastSeen: Date.now() };
