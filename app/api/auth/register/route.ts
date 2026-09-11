@@ -35,13 +35,18 @@ export async function POST(req: Request) {
       return bad('That phone number is already registered', 409);
     }
 
-    let wanted = clean(body.username, 24).toLowerCase().replace(/\s+/g, '');
-    if (!wanted && phone) wanted = handleFromPhone(phone);
+    const requested = clean(body.username, 24).toLowerCase().replace(/\s+/g, '');
+    let wanted = requested || (phone ? handleFromPhone(phone) : '');
     if (!wanted) return bad('Enter a phone number to register');
     if (!/^[a-z0-9._]{3,24}$/.test(wanted)) {
       return bad('Handle must be 3-24 characters: letters, numbers, dot or underscore');
     }
-    if (await usernameTaken(wanted) || (await getUserByUsername(wanted))) {
+
+    if ((await usernameTaken(wanted)) || (await getUserByUsername(wanted))) {
+      // An explicitly chosen handle must stay exactly as asked for, because that is
+      // also how those accounts sign in. Handles derived from a phone number are
+      // internal, so a free variant can be picked silently.
+      if (requested) return bad('That username is already taken', 409);
       let candidate = '';
       for (let i = 0; i < 5; i++) {
         candidate = `${wanted.slice(0, 18)}${rand(3)}`.slice(0, 24);
