@@ -13,11 +13,16 @@ Live: https://varnox-chat.vercel.app
 
 ## Features
 
-- **Accounts** — register and sign in with a username and password. Passwords are hashed with
-  scrypt (per-user salt); the session is an HMAC-signed, HttpOnly, SameSite=Lax cookie.
-- **1:1 chats** — find people by username, start a chat, message back and forth.
-- **Groups** — create a group with a name and members, group photo, admin roles, add and remove
-  members, leave, and **invite links** that anyone signed in can open to join.
+- **Accounts** — register and sign in with a **phone number** and password. Numbers are
+  normalised to `+<countrycode><number>` and must be unique; the phone is the login ID and the
+  way other people find you. Accounts created earlier with a username can still sign in with it.
+  Passwords are hashed with scrypt (per-user salt); the session is an HMAC-signed, HttpOnly,
+  SameSite=Lax cookie.
+- **Discovery** — search by phone number (spaces, dashes and brackets are all accepted).
+- **1:1 chats** — find someone by number, start a chat, message back and forth.
+- **Groups** — create a group with **nobody else in it** if you like, then fill it later by
+  adding people by number or by sharing an invite link. Group photo, admin roles, add and remove
+  members, leave.
 - **Messaging** — text, emoji picker, photo attachments (compressed in the browser before
   upload), reply-to, edit and delete your own messages, day separators, message grouping.
 - **Voice notes** — record in the browser and send; the player has a seekable waveform and
@@ -132,6 +137,11 @@ npm run dev                  # http://localhost:3000
 
 ## Known limits
 
+- **Phone numbers are not verified.** There is no SMS step, so a number is a login ID and a
+  discovery key, not proof of ownership. Real verification needs an SMS provider (Twilio,
+  MessageBird, Vonage) connected to the project; the login flow would then add a one-time code.
+- **Nothing proves the number belongs to the person registering** — the same applies to
+  changing it in Profile. Uniqueness is enforced, ownership is not.
 - **Polling, not push.** New messages appear within about 2-4 seconds rather than instantly.
 - **No delivery guarantee for the online state.** "Delivered" is inferred from the recipient's
   last-seen time, so it can over-report if they were online without receiving the message.
