@@ -104,3 +104,13 @@ export class UnauthorizedError extends Error {
     super('unauthorized');
   }
 }
+/**
+ * The hash stored for an account that signs in with a phone code and has no password.
+ *
+ * It is not a well-formed scrypt tuple, so verifyPassword() can never match it. That is
+ * the point: password login stays unavailable for the account until the user sets one,
+ * rather than being reachable with an empty or guessable password.
+ */
+export function passwordlessHash(): string {
+  return 'otp$disabled';
+}
