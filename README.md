@@ -48,48 +48,46 @@ Live: https://varnox-chat.vercel.app
 
 ## Architecture
 
-Next.js (App Router) hosted on Vercel, with **Vercel Blob as the datastore** — no separate
-database is required.
+Next.js (App Router) hosted on Vercel, with **Postgres (Neon) as the datastore**.
 
-### Why storage is append-only
+### Why Postgres and not Vercel Blob
 
-Vercel Blob serves public blobs through a CDN. Probing the live store showed that:
+This app originally used Vercel Blob as its datastore, with no separate database. That store
+was suspended (`limits-exceeded-suspended`) while holding only **2.5 KB across 18 blobs**,
+because Blob's binding constraint on the Hobby plan is **operations**, not size — and `put()`
+and `list()` both count as the expensive "Advanced Operations" kind. The original design hit
+those constantly:
 
-| Operation | Result |
-| --- | --- |
-| Write a **new** pathname, then read it immediately | fresh content |
-| Write a **new** pathname, then `list()` immediately | visible immediately |
-| **Overwrite** an existing pathname, then read it | **stale content for up to 60s** (cache-busting query strings do not help) |
+- Every mutation wrote a **new** blob and never overwrote one, so the store grew without bound.
+  A presence heartbeat alone wrote a blob every 45 seconds, forever.
+- Nearly every read called `list()` to find the newest version.
+- The client polls hard (`loadChats` every 3.5s, the open chat every 2s), so one open tab
+  generated thousands of advanced operations per hour.
 
-A messenger read path cannot tolerate a minute of staleness, so nothing in Varnox overwrites a
-path. Every mutation writes a **new version** whose name sorts newest-first:
+Postgres has none of those problems: a row is updated in place, reads are indexed, and there is
+no per-operation quota. The old "newest version wins" rule — which existed only to dodge CDN
+cache staleness on overwrite — collapses into a plain `UPDATE`, and the unbounded growth goes
+away with it.
 
-```
-vx/u/<userId>/<inverted-ms>-<rand>.json      user profile versions
-vx/n/<username>/<version>.json               username -> userId index
-vx/c/<convId>/<version>.json                 conversation versions
-vx/m/<convId>/<inverted-ms>-<sender>-<id>.json   one blob per message
-vx/mo/<convId>/<msgId>/<version>.json        edit / delete operations
-vx/uc/<userId>/<convId>/<version>.json       per-user chat index entry
-vx/ur/<userId>/<version>.json                per-user read map
-vx/r/<convId>/<userId>/<version>.json        read receipt
-vx/media/<rand>.<ext>                        uploaded photos
-```
+The schema is in [`db/schema.sql`](db/schema.sql); apply it with `npm run db:apply`. Tables are
+prefixed `vx_`. The exported API of `lib/db.ts` is unchanged, so the routes and the UI were not
+touched by the move.
 
-`<inverted-ms>` is `9999999999999 - timestamp` zero-padded, so lexicographic order equals
-newest-first. Readers take the newest version under a prefix (`list()` with `limit: 1`) or fold
-a full listing down to the newest entry per entity. `allowOverwrite` is disabled, so a repeated
-pathname fails loudly instead of silently serving stale bytes.
+Media (images, voice notes, files) lives in the `vx_media` table and is served back through
+`GET /api/media/<id>`. It used to go to Blob, which is why it moved too.
 
 ### Other notes
 
 - **Realtime is polling.** Vercel serverless functions cannot hold WebSocket connections. The
   open conversation is polled every 2s using `?since=<timestamp>` so only new messages cross
-  the wire; the chat list refreshes every 3.5s. Polling pauses when the tab is hidden.
-- **Reads are cheap.** Blob URLs are deterministic, and short-lived in-process caches absorb
-  repeated reads on warm function instances.
-- **Media** is uploaded directly from the browser to Blob via `POST /api/upload` after
-  client-side downscaling (max 1600px, JPEG q0.82, 6 MB limit).
+  the wire; the chat list refreshes every 3.5s. Polling pauses when the tab is hidden. This is
+  now merely wasteful rather than quota-destroying, but it is still the main load on the
+  database if the app ever gets busy.
+- **Reads are cheap.** Queries are indexed and a short-lived in-process cache (`lib/cache.ts`)
+  absorbs the repeat reads from polling on warm function instances.
+- **Media** is uploaded via `POST /api/upload` after client-side downscaling (max 1600px, JPEG
+  q0.82, 6 MB limit, and the route caps bodies at 4 MB), stored in Postgres, and served from
+  `GET /api/media/<id>`.
 - **Ticks** derive from per-conversation read receipts: two ticks means every other member has
   been online since the message was sent, blue ticks means they have read past it.
 
@@ -97,7 +95,8 @@ pathname fails loudly instead of silently serving stale bytes.
 
 ```bash
 npm install
-cp .env.example .env.local   # then fill in BLOB_READ_WRITE_TOKEN and SESSION_SECRET
+cp .env.example .env.local   # then fill in DATABASE_URL and SESSION_SECRET
+npm run db:apply             # create the tables (safe to re-run)
 npm run dev                  # http://localhost:3000
 ```
 
@@ -105,8 +104,11 @@ npm run dev                  # http://localhost:3000
 
 | Name | Required | Purpose |
 | --- | --- | --- |
-| `BLOB_READ_WRITE_TOKEN` | yes | Read/write access to the Vercel Blob store (set automatically when the store is connected to the project) |
+| `DATABASE_URL` | yes | Postgres connection string (Neon). Use the pooled endpoint. |
 | `SESSION_SECRET` | yes | HMAC key for session cookies. Rotating it signs everyone out. |
+
+`pg` does not understand Neon's `channel_binding=require` parameter, so `lib/pg.ts` strips it
+when opening the pool — you can paste Neon's string in verbatim.
 
 ## Endpoints
 
@@ -133,7 +135,8 @@ npm run dev                  # http://localhost:3000
 | `GET` | `/api/starred` | Starred messages |
 | `POST` | `/api/messages/bulk` | Star, unstar or delete several messages at once |
 | `POST` | `/api/messages/forward` | Forward messages into other chats |
-| `POST` | `/api/upload` | Upload a photo, voice note or document |
+  | `POST` | `/api/upload` | Upload a photo, voice note or document |
+  | `GET` | `/api/media/[id]` | Serve an uploaded image, voice note or document |
 
 ## Known limits
 
@@ -145,8 +148,8 @@ npm run dev                  # http://localhost:3000
 - **Polling, not push.** New messages appear within about 2-4 seconds rather than instantly.
 - **No delivery guarantee for the online state.** "Delivered" is inferred from the recipient's
   last-seen time, so it can over-report if they were online without receiving the message.
-- **Chat history is capped per fetch** (45 messages per page, with "load older" paging) and
-  large conversations cost one `list()` page per chunk of history.
+  - **Chat history is capped per fetch** (45 messages per page, with "load older" paging). Each
+    page is one indexed query, so paging deeper does not get progressively more expensive.
 - **Uploads are capped at 4 MB** because Vercel functions reject larger request bodies.
 - **Attachments are public** (unguessable URL, but not access-controlled). Serving them through
   an authenticated proxy is the next step.

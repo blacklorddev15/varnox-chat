@@ -1,6 +1,6 @@
 import { requireUser } from '@/lib/auth';
 import { bad, handle, ok } from '@/lib/api';
-import { putBinary, rand } from '@/lib/blob';
+import { extensionFor, saveMedia } from '@/lib/media';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,8 +59,10 @@ export async function POST(req: Request) {
       category = 'voice';
     }
 
-    const ext = (type.split('/')[1] || 'bin').split(';')[0].replace('jpeg', 'jpg').slice(0, 8);
-    const url = await putBinary(`vx/media/${category}/${rand(12)}.${ext}`, buffer, type);
+    // Stored in Postgres and served back through /api/media/<id>. The extension is kept
+    // on the URL so a direct link or a download saves with a sensible name.
+    const stored = await saveMedia(buffer, type);
+    const url = `${stored.url}.${extensionFor(type)}`;
 
     return ok(
       {

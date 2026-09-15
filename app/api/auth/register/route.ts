@@ -7,7 +7,7 @@ import {
 } from '@/lib/auth';
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
 import { getUserByUsername, phoneTaken, reservePhone, reserveUsername, saveUser, usernameTaken } from '@/lib/db';
-import { rand, newId } from '@/lib/blob';
+import { rand, newId } from '@/lib/ids';
 import { formatPhone, normalisePhone } from '@/lib/phone';
 import type { User } from '@/lib/types';
 

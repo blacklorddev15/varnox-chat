@@ -1,4 +1,4 @@
-import { newId } from './blob';
+import { newId } from './ids';
 import {
   getConv,
   lastMessage,

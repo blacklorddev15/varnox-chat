@@ -8,7 +8,7 @@ import {
   getSettings,
   getTyping,
 } from '@/lib/db';
-import { newId } from '@/lib/blob';
+import { newId } from '@/lib/ids';
 import { deliverMessage } from '@/lib/service';
 import type { Message, MessageType } from '@/lib/types';
 

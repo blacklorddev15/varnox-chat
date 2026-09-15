@@ -1,101 +1,140 @@
-import {
-  ROOT,
-  cached,
-  del,
-  invalidate,
-  listAll,
-  listPrefix,
-  newestJson,
-  putJson,
-  rand,
-  readJson,
-  sortNewest,
-  versionKey,
-} from './blob';
+import { cached, invalidate } from './cache';
+import { rand } from './ids';
+import { q } from './pg';
 import { looksLikePhone, phoneKey } from './phone';
 import type {
   ChatPrefs,
   Conv,
-  ConvRead,
   ConvType,
   Invite,
   MemberMarker,
   Message,
   MsgOp,
-  Presence,
   PublicUser,
   Reaction,
-  ReadState,
   StarredItem,
-  TypingState,
   User,
   UserSettings,
 } from './types';
 
-const usersPrefix = (id: string) => `${ROOT}/u/${id}`;
-const nameIndexPrefix = (usernameLower: string) => `${ROOT}/n/${usernameLower}`;
-const convPrefix = (id: string) => `${ROOT}/c/${id}`;
-const memberPrefix = (userId: string) => `${ROOT}/uc/${userId}`;
-const msgPrefix = (convId: string) => `${ROOT}/m/${convId}`;
-const opPrefix = (convId: string) => `${ROOT}/mo/${convId}`;
-const readMapPrefix = (userId: string) => `${ROOT}/ur/${userId}`;
-const convReadPrefix = (convId: string) => `${ROOT}/r/${convId}`;
-const phoneIndexPrefix = (digits: string) => `${ROOT}/ph/${digits}`;
-const settingsPrefix = (userId: string) => `${ROOT}/set/${userId}`;
-const reactionPrefix = (convId: string) => `${ROOT}/rx/${convId}`;
-const starPrefix = (userId: string) => `${ROOT}/star/${userId}`;
-const typingPrefix = (convId: string) => `${ROOT}/ty/${convId}`;
-const presencePrefix = (userId: string) => `${ROOT}/pr/${userId}`;
-const invitePrefix = (code: string) => `${ROOT}/inv/${code}`;
+/**
+ * The datastore.
+ *
+ * This used to be Vercel Blob, where every mutation wrote a NEW uniquely-named blob and
+ * readers took the newest version under a prefix, because an overwritten blob kept
+ * serving stale bytes from the CDN. That scheme had two consequences: an unbounded
+ * number of blobs (presence heartbeats alone wrote one every 45 seconds, forever) and a
+ * very high operation count, which is what got the Blob store suspended on the Hobby
+ * plan.
+ *
+ * Postgres has neither problem, so every "newest version wins" file is now a single row
+ * that gets updated in place. The exported function signatures are unchanged, so the API
+ * routes and the UI were not touched.
+ */
 
 export function inverseStamp(at: number): string {
   return String(9_999_999_999_999 - at).padStart(13, '0');
 }
 
-/** pathname segment helpers ------------------------------------------------ */
+/* ── users ─────────────────────────────────────────────────────────────── */
 
-function segs(pathname: string): string[] {
-  return pathname.split('/');
+type UserRow = {
+  id: string;
+  username: string;
+  phone: string | null;
+  display_name: string;
+  about: string;
+  avatar: string | null;
+  pw_hash: string;
+  created_at: number;
+  last_seen: number;
+};
+
+function toUser(r: UserRow): User {
+  return {
+    id: r.id,
+    username: r.username,
+    phone: r.phone ?? null,
+    displayName: r.display_name,
+    about: r.about ?? '',
+    avatar: r.avatar ?? null,
+    pwHash: r.pw_hash,
+    createdAt: Number(r.created_at),
+    lastSeen: Number(r.last_seen),
+  };
 }
 
-// vx/m/<convId>/<inv>-<senderId>-<msgId>.json
-function parseMsgPath(pathname: string) {
-  const s = segs(pathname);
-  const file = s[s.length - 1] ?? '';
-  const convId = s[s.length - 2] ?? '';
-  const base = file.replace(/\.json$/, '');
-  const [inv, senderId, msgId] = base.split('-');
-  return { convId, inv, senderId, msgId };
+function toPublicUser(u: User): PublicUser {
+  return {
+    id: u.id,
+    username: u.username,
+    phone: u.phone ?? null,
+    displayName: u.displayName,
+    about: u.about,
+    avatar: u.avatar,
+    lastSeen: u.lastSeen,
+  };
 }
-
-/** users ------------------------------------------------------------------- */
 
 export async function getUser(id: string): Promise<User | null> {
   if (!id) return null;
-  return cached(`u:${id}`, 4_000, () => newestJson<User>(usersPrefix(id)));
+  return cached(`u:${id}`, 4_000, async () => {
+    const rows = await q<UserRow>('select * from vx_users where id = $1', [id]);
+    return rows[0] ? toUser(rows[0]) : null;
+  });
 }
 
 export async function saveUser(user: User): Promise<void> {
-  await putJson(`${usersPrefix(user.id)}/${versionKey()}.json`, user);
+  await q(
+    `insert into vx_users
+       (id, username, phone, display_name, about, avatar, pw_hash, created_at, last_seen)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     on conflict (id) do update set
+       username = excluded.username,
+       phone = excluded.phone,
+       display_name = excluded.display_name,
+       about = excluded.about,
+       avatar = excluded.avatar,
+       pw_hash = excluded.pw_hash,
+       last_seen = excluded.last_seen`,
+    [
+      user.id,
+      user.username,
+      user.phone ?? null,
+      user.displayName,
+      user.about ?? '',
+      user.avatar ?? null,
+      user.pwHash,
+      user.createdAt,
+      user.lastSeen,
+    ]
+  );
   invalidate(`u:${user.id}`);
 }
 
 export async function getUserByUsername(username: string): Promise<User | null> {
-  const idx = await newestJson<{ userId: string }>(nameIndexPrefix(username.trim().toLowerCase()));
-  if (!idx?.userId) return null;
-  return getUser(idx.userId);
+  const rows = await q<{ user_id: string }>(
+    'select user_id from vx_usernames where username = $1',
+    [username.trim().toLowerCase()]
+  );
+  if (!rows[0]?.user_id) return null;
+  return getUser(rows[0].user_id);
 }
 
 export async function usernameTaken(username: string): Promise<boolean> {
-  const { blobs } = await listPrefix(nameIndexPrefix(username.trim().toLowerCase()), 1);
-  return blobs.length > 0;
+  const rows = await q('select 1 from vx_usernames where username = $1 limit 1', [
+    username.trim().toLowerCase(),
+  ]);
+  return rows.length > 0;
 }
 
 export async function reserveUsername(username: string, userId: string): Promise<void> {
-  await putJson(`${nameIndexPrefix(username.trim().toLowerCase())}/${versionKey()}.json`, {
-    userId,
-    username,
-  });
+  await q(
+    `insert into vx_usernames (username, user_id, created_at)
+     values ($1, $2, $3)
+     on conflict (username) do update set user_id = excluded.user_id`,
+    [username.trim().toLowerCase(), userId, Date.now()]
+  );
 }
 
 /** Find people by username prefix, or by an exact phone number. */
@@ -104,11 +143,14 @@ export async function searchUsers(term: string, excludeId: string): Promise<Publ
   if (raw.length < 1) return [];
 
   const ids = new Set<string>();
-  const { blobs } = await listPrefix(nameIndexPrefix(raw.toLowerCase()), 12);
-  for (const b of blobs) {
-    const idx = await readJson<{ userId: string }>(b.url);
-    if (idx?.userId) ids.add(idx.userId);
-  }
+
+  // Escape LIKE wildcards so a search for "a_b" cannot match "axb".
+  const prefix = raw.toLowerCase().replace(/[\\%_]/g, (c) => '\\' + c) + '%';
+  const byName = await q<{ user_id: string }>(
+    'select user_id from vx_usernames where username like $1 order by username limit 12',
+    [prefix]
+  );
+  for (const r of byName) ids.add(r.user_id);
 
   if (looksLikePhone(raw)) {
     const byPhone = await getUserByPhone(raw);
@@ -117,114 +159,313 @@ export async function searchUsers(term: string, excludeId: string): Promise<Publ
 
   ids.delete(excludeId);
   const users = await Promise.all([...ids].slice(0, 12).map((id) => getUser(id)));
-  return users
-    .filter((u): u is User => Boolean(u))
-    .map((u) => ({
-      id: u.id,
-      username: u.username,
-      phone: u.phone ?? null,
-      displayName: u.displayName,
-      about: u.about,
-      avatar: u.avatar,
-      lastSeen: u.lastSeen,
-    }));
+  return users.filter((u): u is User => Boolean(u)).map(toPublicUser);
 }
 
 export async function getUserByPhone(phone: string): Promise<User | null> {
-  const idx = await newestJson<{ userId: string }>(phoneIndexPrefix(phoneKey(phone)));
-  if (!idx?.userId) return null;
-  return getUser(idx.userId);
+  const rows = await q<{ user_id: string }>('select user_id from vx_phones where phone = $1', [
+    phoneKey(phone),
+  ]);
+  if (!rows[0]?.user_id) return null;
+  return getUser(rows[0].user_id);
 }
 
 export async function phoneTaken(phone: string): Promise<boolean> {
-  const { blobs } = await listPrefix(phoneIndexPrefix(phoneKey(phone)), 1);
-  return blobs.length > 0;
+  const rows = await q('select 1 from vx_phones where phone = $1 limit 1', [phoneKey(phone)]);
+  return rows.length > 0;
 }
 
 export async function reservePhone(phone: string, userId: string): Promise<void> {
-  await putJson(`${phoneIndexPrefix(phoneKey(phone))}/${versionKey()}.json`, { userId, phone });
+  await q(
+    `insert into vx_phones (phone, user_id) values ($1, $2)
+     on conflict (phone) do update set user_id = excluded.user_id`,
+    [phoneKey(phone), userId]
+  );
 }
 
 /** Release a number so it can be claimed by another account. */
 export async function releasePhone(phone: string): Promise<void> {
-  const key = phoneKey(phone);
-  const { blobs } = await listPrefix(phoneIndexPrefix(key), 100);
-  await Promise.all(blobs.map((b) => del(b.url).catch(() => undefined)));
+  await q('delete from vx_phones where phone = $1', [phoneKey(phone)]);
 }
 
-/** conversations ----------------------------------------------------------- */
+/* ── conversations ─────────────────────────────────────────────────────── */
+
+type ConvRow = {
+  id: string;
+  type: string;
+  name: string;
+  avatar: string | null;
+  members: string[];
+  admins: string[];
+  created_by: string;
+  created_at: number;
+  disappear_sec: number;
+};
+
+function toConv(r: ConvRow): Conv {
+  return {
+    id: r.id,
+    type: r.type as ConvType,
+    name: r.name ?? '',
+    avatar: r.avatar ?? null,
+    members: r.members ?? [],
+    admins: r.admins ?? [],
+    createdBy: r.created_by,
+    createdAt: Number(r.created_at),
+    disappearSec: r.disappear_sec ?? 0,
+  };
+}
 
 export async function getConv(id: string): Promise<Conv | null> {
   if (!id) return null;
-  return cached(`c:${id}`, 5_000, () => newestJson<Conv>(convPrefix(id)));
+  return cached(`c:${id}`, 5_000, async () => {
+    const rows = await q<ConvRow>('select * from vx_convs where id = $1', [id]);
+    return rows[0] ? toConv(rows[0]) : null;
+  });
 }
 
 export async function saveConv(conv: Conv): Promise<void> {
-  await putJson(`${convPrefix(conv.id)}/${versionKey()}.json`, conv);
+  await q(
+    `insert into vx_convs
+       (id, type, name, avatar, members, admins, created_by, created_at, disappear_sec)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     on conflict (id) do update set
+       type = excluded.type,
+       name = excluded.name,
+       avatar = excluded.avatar,
+       members = excluded.members,
+       admins = excluded.admins,
+       disappear_sec = excluded.disappear_sec`,
+    [
+      conv.id,
+      conv.type,
+      conv.name ?? '',
+      conv.avatar ?? null,
+      JSON.stringify(conv.members ?? []),
+      JSON.stringify(conv.admins ?? []),
+      conv.createdBy,
+      conv.createdAt,
+      conv.disappearSec ?? 0,
+    ]
+  );
   invalidate(`c:${conv.id}`);
 }
 
+type MarkerRow = {
+  user_id: string;
+  conv_id: string;
+  conv_name: string;
+  conv_type: string;
+  conv_avatar: string | null;
+  at: number;
+  last: MemberMarker['last'];
+  is_left: boolean;
+};
+
+function toMarker(r: MarkerRow): MemberMarker {
+  return {
+    convId: r.conv_id,
+    userId: r.user_id,
+    convName: r.conv_name ?? '',
+    convType: r.conv_type as ConvType,
+    convAvatar: r.conv_avatar ?? null,
+    at: Number(r.at),
+    last: r.last ?? null,
+    left: r.is_left ? true : undefined,
+  };
+}
+
+/**
+ * Upsert, so the latest write wins.
+ *
+ * The Blob version kept every write and picked the row with the largest `at`, which
+ * meant `hideConvFor` (which writes with the conversation's createdAt) could never
+ * actually hide a chat you had since exchanged messages in. Writing state directly
+ * fixes that, and the callers all pass monotonically increasing timestamps, so sidebar
+ * ordering is unaffected.
+ */
 export async function putMarker(marker: MemberMarker): Promise<void> {
-  await putJson(`${memberPrefix(marker.userId)}/${marker.convId}/${versionKey(marker.at)}.json`, marker);
+  await q(
+    `insert into vx_markers
+       (user_id, conv_id, conv_name, conv_type, conv_avatar, at, last, is_left)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)
+     on conflict (user_id, conv_id) do update set
+       conv_name = excluded.conv_name,
+       conv_type = excluded.conv_type,
+       conv_avatar = excluded.conv_avatar,
+       at = excluded.at,
+       last = excluded.last,
+       is_left = excluded.is_left`,
+    [
+      marker.userId,
+      marker.convId,
+      marker.convName ?? '',
+      marker.convType,
+      marker.convAvatar ?? null,
+      marker.at,
+      marker.last ? JSON.stringify(marker.last) : null,
+      Boolean(marker.left),
+    ]
+  );
   invalidate(`uc:${marker.userId}`);
 }
 
 /** Newest marker per conversation for one user, most recent first. */
-export async function listMarkers(userId: string, opts: { includeLeft?: boolean } = {}): Promise<MemberMarker[]> {
-  const newestPaths = await cached(`uc:${userId}`, 2_000, async () => {
-    const { blobs } = await listPrefix(memberPrefix(userId), 1000);
-    // newest version per convId (pathnames sort newest-first within a group)
-    const best = new Map<string, { pathname: string; url: string }>();
-    for (const b of blobs) {
-      const parts = segs(b.pathname);
-      const convId = parts[parts.length - 2];
-      const cur = best.get(convId);
-      if (!cur || b.pathname < cur.pathname) best.set(convId, { pathname: b.pathname, url: b.url });
-    }
-    return [...best.values()];
+export async function listMarkers(
+  userId: string,
+  opts: { includeLeft?: boolean } = {}
+): Promise<MemberMarker[]> {
+  // The unfiltered set is what gets cached, so an includeLeft call cannot be served a
+  // filtered list (and vice versa).
+  const all = await cached(`uc:${userId}`, 2_000, async () => {
+    const rows = await q<MarkerRow>(
+      `select user_id, conv_id, conv_name, conv_type, conv_avatar, at, last, is_left
+       from vx_markers where user_id = $1 order by at desc`,
+      [userId]
+    );
+    return rows.map(toMarker);
   });
-  const markers = await Promise.all(
-    newestPaths.map((p) => readJson<MemberMarker>(p.url))
-  );
-  const out = markers.filter((m): m is MemberMarker => Boolean(m));
-  const visible = opts.includeLeft ? out : out.filter((m) => !m.left);
-  return visible.sort((a, b) => b.at - a.at);
+  return opts.includeLeft ? all : all.filter((m) => !m.left);
 }
 
-/** messages ---------------------------------------------------------------- */
+/* ── messages ──────────────────────────────────────────────────────────── */
+
+type MessageRow = {
+  id: string;
+  conv_id: string;
+  sender_id: string;
+  sender_name: string;
+  at: number;
+  type: string;
+  text: string;
+  media_url: string | null;
+  media_w: number | null;
+  media_h: number | null;
+  audio_sec: number | null;
+  file_name: string | null;
+  file_size: number | null;
+  mime: string | null;
+  forwarded: boolean;
+  reply_to: Message['replyTo'];
+};
+
+/**
+ * Optional fields are omitted rather than set to null, matching the JSON documents the
+ * Blob version stored, so nothing downstream starts seeing nulls where it used to see
+ * an absent key.
+ */
+function toMessage(r: MessageRow): Message {
+  const msg: Message = {
+    id: r.id,
+    convId: r.conv_id,
+    senderId: r.sender_id,
+    senderName: r.sender_name,
+    at: Number(r.at),
+    type: r.type as Message['type'],
+    text: r.text ?? '',
+  };
+  if (r.media_url != null) msg.mediaUrl = r.media_url;
+  if (r.media_w != null) msg.mediaW = Number(r.media_w);
+  if (r.media_h != null) msg.mediaH = Number(r.media_h);
+  if (r.audio_sec != null) msg.audioSec = Number(r.audio_sec);
+  if (r.file_name != null) msg.fileName = r.file_name;
+  if (r.file_size != null) msg.fileSize = Number(r.file_size);
+  if (r.mime != null) msg.mime = r.mime;
+  if (r.forwarded) msg.forwarded = true;
+  if (r.reply_to != null) msg.replyTo = r.reply_to;
+  return msg;
+}
 
 export async function saveMessage(msg: Message): Promise<void> {
-  const inv = inverseStamp(msg.at);
-  await putJson(`${msgPrefix(msg.convId)}/${inv}-${msg.senderId}-${msg.id}.json`, msg);
+  await q(
+    `insert into vx_messages
+       (id, conv_id, sender_id, sender_name, at, type, text, media_url, media_w, media_h,
+        audio_sec, file_name, file_size, mime, forwarded, reply_to)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+     on conflict (id) do update set
+       text = excluded.text,
+       media_url = excluded.media_url,
+       media_w = excluded.media_w,
+       media_h = excluded.media_h,
+       audio_sec = excluded.audio_sec,
+       file_name = excluded.file_name,
+       file_size = excluded.file_size,
+       mime = excluded.mime,
+       forwarded = excluded.forwarded,
+       reply_to = excluded.reply_to`,
+    [
+      msg.id,
+      msg.convId,
+      msg.senderId,
+      msg.senderName,
+      msg.at,
+      msg.type,
+      msg.text ?? '',
+      msg.mediaUrl ?? null,
+      msg.mediaW ?? null,
+      msg.mediaH ?? null,
+      msg.audioSec ?? null,
+      msg.fileName ?? null,
+      msg.fileSize ?? null,
+      msg.mime ?? null,
+      Boolean(msg.forwarded),
+      msg.replyTo ? JSON.stringify(msg.replyTo) : null,
+    ]
+  );
   invalidate(`m:${msg.convId}`);
 }
 
+type OpRow = { msg_id: string; conv_id: string; op: string; text: string | null; at: number };
+
 export async function getMessageOps(convId: string): Promise<Record<string, MsgOp>> {
   return cached(`mo:${convId}`, 4_000, async () => {
-    const { blobs } = await listPrefix(opPrefix(convId), 1000);
-    const best = new Map<string, string>();
-    for (const b of blobs) {
-      const parts = segs(b.pathname);
-      const msgId = parts[parts.length - 2];
-      const cur = best.get(msgId);
-      if (!cur || b.pathname < cur) best.set(msgId, b.pathname);
-    }
-    const byPath = new Map(blobs.map((b) => [b.pathname, b.url]));
-    const ops = await Promise.all(
-      [...best.values()].map(async (p) => {
-        const url = byPath.get(p);
-        return url ? readJson<MsgOp>(url) : null;
-      })
+    const rows = await q<OpRow>(
+      'select msg_id, conv_id, op, text, at from vx_msg_ops where conv_id = $1',
+      [convId]
     );
     const map: Record<string, MsgOp> = {};
-    for (const op of ops) if (op) map[op.msgId] = op;
+    for (const r of rows) {
+      map[r.msg_id] = {
+        convId: r.conv_id,
+        msgId: r.msg_id,
+        op: r.op as MsgOp['op'],
+        ...(r.text != null ? { text: r.text } : {}),
+        at: Number(r.at),
+      };
+    }
     return map;
   });
 }
 
 export async function saveMessageOp(op: MsgOp): Promise<void> {
-  await putJson(`${opPrefix(op.convId)}/${op.msgId}/${versionKey(op.at)}.json`, op);
+  await q(
+    `insert into vx_msg_ops (msg_id, conv_id, op, text, at)
+     values ($1, $2, $3, $4, $5)
+     on conflict (msg_id) do update set
+       op = excluded.op,
+       text = excluded.text,
+       at = excluded.at
+     where excluded.at >= vx_msg_ops.at`,
+    [op.msgId, op.convId, op.op, op.text ?? null, op.at]
+  );
   invalidate(`mo:${op.convId}`);
+}
+
+/**
+ * Page cursor. The Blob version used an opaque storage cursor; here it encodes the last
+ * row of the page as "at_id", which is exactly what the next page continues from.
+ */
+function encodeCursor(at: number, id: string): string {
+  return `${at}_${id}`;
+}
+
+function decodeCursor(cursor: string): { at: number; id: string } | null {
+  const cut = cursor.indexOf('_');
+  if (cut < 1) return null;
+  const at = Number(cursor.slice(0, cut));
+  const id = cursor.slice(cut + 1);
+  if (!Number.isFinite(at) || !id) return null;
+  return { at, id };
 }
 
 /**
@@ -236,20 +477,36 @@ export async function getMessages(
   opts: { limit?: number; cursor?: string; since?: number; hideBefore?: number } = {}
 ): Promise<{ messages: Message[]; cursor?: string; hasMore: boolean }> {
   const limit = Math.min(opts.limit ?? 40, 200);
-  const { blobs, cursor, hasMore } = await listPrefix(msgPrefix(convId), limit, opts.cursor);
+  const after = opts.cursor ? decodeCursor(opts.cursor) : null;
 
-  let picked = blobs;
+  const params: unknown[] = [convId];
+  let where = 'conv_id = $1';
+  if (after) {
+    params.push(after.at, after.id);
+    where += ` and (at, id) < ($2, $3)`;
+  }
+  // Fetch one extra row so hasMore is known without a second query.
+  params.push(limit + 1);
+
+  const rows = await q<MessageRow>(
+    `select * from vx_messages where ${where} order by at desc, id desc limit $${params.length}`,
+    params
+  );
+
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const tail = page[page.length - 1];
+  const cursor = tail ? encodeCursor(Number(tail.at), tail.id) : undefined;
+
+  let msgs = page.map(toMessage);
   if (opts.since) {
-    const boundary = inverseStamp(opts.since);
-    picked = blobs.filter((b) => parseMsgPath(b.pathname).inv < boundary);
+    const since = opts.since;
+    msgs = msgs.filter((m) => m.at > since);
   }
 
-  const msgs = await Promise.all(picked.map((b) => readJson<Message>(b.url)));
   const ops = await getMessageOps(convId);
-
   const clean: Message[] = [];
   for (const m of msgs) {
-    if (!m) continue;
     if (opts.hideBefore && m.at < opts.hideBefore) continue;
     const op = ops[m.id];
     if (op?.op === 'delete') continue;
@@ -266,31 +523,35 @@ export async function messagesSince(convId: string, since: number): Promise<Mess
 }
 
 export async function lastMessage(convId: string): Promise<Message | null> {
-  const { blobs } = await listPrefix(msgPrefix(convId), 1);
-  const first = sortNewest(blobs)[0];
-  if (!first) return null;
-  return readJson<Message>(first.url);
+  // Deliberately does not apply edit/delete ops, matching the previous behaviour: this
+  // feeds the sidebar preview, which is written at send time and not rewritten by ops.
+  const rows = await q<MessageRow>(
+    'select * from vx_messages where conv_id = $1 order by at desc, id desc limit 1',
+    [convId]
+  );
+  return rows[0] ? toMessage(rows[0]) : null;
 }
 
 /** Unread count for one conversation: messages after `since` not sent by me. */
 export async function countUnread(convId: string, userId: string, since: number): Promise<number> {
-  return cached(`un:${convId}:${userId}:${since}`, 2_000, async () => {
-    const { blobs } = await listPrefix(msgPrefix(convId), 100);
-    const boundary = inverseStamp(since);
-    let n = 0;
-    for (const b of blobs) {
-      const p = parseMsgPath(b.pathname);
-      if (p.inv < boundary && p.senderId !== userId) n++;
-    }
-    return n;
-  });
+  const rows = await q<{ n: number }>(
+    `select count(*)::int as n from vx_messages
+     where conv_id = $1 and at > $2 and sender_id <> $3`,
+    [convId, since, userId]
+  );
+  return rows[0]?.n ?? 0;
 }
 
-/** read state -------------------------------------------------------------- */
+/* ── read state ────────────────────────────────────────────────────────── */
 
 export async function getReads(userId: string): Promise<Record<string, number>> {
-  const state = await cached(`ur:${userId}`, 2_000, () => newestJson<ReadState>(readMapPrefix(userId)));
-  return state?.reads ?? {};
+  const rows = await q<{ conv_id: string; at: number }>(
+    'select conv_id, at from vx_reads where user_id = $1',
+    [userId]
+  );
+  const out: Record<string, number> = {};
+  for (const r of rows) out[r.conv_id] = Number(r.at);
+  return out;
 }
 
 /**
@@ -304,21 +565,19 @@ export async function markRead(
   at: number,
   opts: { shareReceipt?: boolean } = {}
 ): Promise<void> {
-  const current = await getReads(userId);
-  const next = Math.max(current[convId] ?? 0, at);
-  if (next === current[convId]) return;
-  const reads = { ...current, [convId]: next };
-  await putJson(`${readMapPrefix(userId)}/${versionKey()}.json`, {
-    userId,
-    reads,
-    at: Date.now(),
-  } satisfies ReadState);
+  const rows = await q<{ at: number }>(
+    `insert into vx_reads (user_id, conv_id, at) values ($1, $2, $3)
+     on conflict (user_id, conv_id) do update set at = greatest(vx_reads.at, excluded.at)
+     returning at`,
+    [userId, convId, at]
+  );
+  const next = Number(rows[0]?.at ?? at);
   if (opts.shareReceipt !== false) {
-    await putJson(`${convReadPrefix(convId)}/${userId}/${versionKey(at)}.json`, {
-      convId,
-      userId,
-      at: next,
-    } satisfies ConvRead);
+    await q(
+      `insert into vx_conv_reads (conv_id, user_id, at) values ($1, $2, $3)
+       on conflict (conv_id, user_id) do update set at = greatest(vx_conv_reads.at, excluded.at)`,
+      [convId, userId, next]
+    );
     invalidate(`r:${convId}`);
   }
   invalidate(`ur:${userId}`);
@@ -326,28 +585,17 @@ export async function markRead(
 
 export async function getConvReads(convId: string): Promise<Record<string, number>> {
   return cached(`r:${convId}`, 3_000, async () => {
-    const { blobs } = await listPrefix(convReadPrefix(convId), 1000);
-    const best = new Map<string, string>();
-    for (const b of blobs) {
-      const parts = segs(b.pathname);
-      const userId = parts[parts.length - 2];
-      const cur = best.get(userId);
-      if (!cur || b.pathname < cur) best.set(userId, b.pathname);
-    }
-    const byPath = new Map(blobs.map((b) => [b.pathname, b.url]));
-    const rows = await Promise.all(
-      [...best.values()].map(async (p) => {
-        const url = byPath.get(p);
-        return url ? readJson<ConvRead>(url) : null;
-      })
+    const rows = await q<{ user_id: string; at: number }>(
+      'select user_id, at from vx_conv_reads where conv_id = $1',
+      [convId]
     );
     const map: Record<string, number> = {};
-    for (const r of rows) if (r) map[r.userId] = r.at;
+    for (const r of rows) map[r.user_id] = Number(r.at);
     return map;
   });
 }
 
-/** Aggregates -------------------------------------------------------------- */
+/* ── aggregates ────────────────────────────────────────────────────────── */
 
 export type ChatSummary = {
   conv: Conv;
@@ -393,9 +641,7 @@ export async function chatSummaries(userId: string): Promise<ChatSummary[]> {
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-/* ==========================================================================
-   Settings (wallpaper, notifications, privacy, per-chat prefs, blocked list)
-   ========================================================================== */
+/* ── settings (wallpaper, notifications, privacy, per-chat prefs, blocked) ── */
 
 export function defaultSettings(userId: string): UserSettings {
   return {
@@ -409,23 +655,56 @@ export function defaultSettings(userId: string): UserSettings {
   };
 }
 
+type SettingsRow = {
+  user_id: string;
+  wallpaper: string;
+  notifications: boolean;
+  privacy: UserSettings['privacy'] | null;
+  chat_prefs: Record<string, ChatPrefs> | null;
+  blocked: string[] | null;
+  at: number;
+};
+
 export async function getSettings(userId: string): Promise<UserSettings> {
-  const stored = await cached(`set:${userId}`, 4_000, () =>
-    newestJson<UserSettings>(settingsPrefix(userId))
-  );
-  if (!stored) return defaultSettings(userId);
-  return {
-    ...defaultSettings(userId),
-    ...stored,
-    privacy: { ...defaultSettings(userId).privacy, ...(stored.privacy ?? {}) },
-    chatPrefs: stored.chatPrefs ?? {},
-    blocked: stored.blocked ?? [],
-  };
+  const base = defaultSettings(userId);
+  return cached(`set:${userId}`, 4_000, async () => {
+    const rows = await q<SettingsRow>('select * from vx_settings where user_id = $1', [userId]);
+    const stored = rows[0];
+    if (!stored) return base;
+    return {
+      ...base,
+      wallpaper: (stored.wallpaper as UserSettings['wallpaper']) ?? base.wallpaper,
+      notifications: stored.notifications ?? base.notifications,
+      privacy: { ...base.privacy, ...(stored.privacy ?? {}) },
+      chatPrefs: stored.chat_prefs ?? {},
+      blocked: stored.blocked ?? [],
+      at: Number(stored.at) || base.at,
+    };
+  });
 }
 
 export async function saveSettings(settings: UserSettings): Promise<UserSettings> {
   const next = { ...settings, at: Date.now() };
-  await putJson(`${settingsPrefix(next.userId)}/${versionKey()}.json`, next);
+  await q(
+    `insert into vx_settings (user_id, wallpaper, notifications, privacy, chat_prefs, blocked, at)
+     values ($1, $2, $3, $4, $5, $6, $7)
+     on conflict (user_id) do update set
+       wallpaper = excluded.wallpaper,
+       notifications = excluded.notifications,
+       privacy = excluded.privacy,
+       chat_prefs = excluded.chat_prefs,
+       blocked = excluded.blocked,
+       at = excluded.at`,
+    [
+      next.userId,
+      next.wallpaper,
+      next.notifications,
+      JSON.stringify(next.privacy ?? {}),
+      JSON.stringify(next.chatPrefs ?? {}),
+      JSON.stringify(next.blocked ?? []),
+      next.at,
+    ]
+  );
   invalidate(`set:${next.userId}`);
   return next;
 }
@@ -465,14 +744,17 @@ export async function toggleBlocked(userId: string, otherId: string, block: bool
   return saveSettings({ ...current, blocked });
 }
 
-/* ==========================================================================
-   Reactions, stars, typing, presence, invites
-   ========================================================================== */
+/* ── reactions, stars, typing, presence, invites ───────────────────────── */
 
 export async function putReaction(reaction: Reaction): Promise<void> {
-  await putJson(
-    `${reactionPrefix(reaction.convId)}/${reaction.msgId}/${reaction.userId}/${versionKey(reaction.at)}.json`,
-    reaction
+  await q(
+    `insert into vx_reactions (msg_id, user_id, conv_id, emoji, at)
+     values ($1, $2, $3, $4, $5)
+     on conflict (msg_id, user_id) do update set
+       conv_id = excluded.conv_id,
+       emoji = excluded.emoji,
+       at = excluded.at`,
+    [reaction.msgId, reaction.userId, reaction.convId, reaction.emoji, reaction.at]
   );
   invalidate(`rx:${reaction.convId}`);
 }
@@ -480,35 +762,24 @@ export async function putReaction(reaction: Reaction): Promise<void> {
 /** msgId -> userId -> emoji (empty reactions are dropped) */
 export async function getReactions(convId: string): Promise<Record<string, Record<string, string>>> {
   return cached(`rx:${convId}`, 2_000, async () => {
-    const { blobs } = await listPrefix(reactionPrefix(convId), 1000);
-    const best = new Map<string, string>();
-    for (const b of blobs) {
-      const parts = segs(b.pathname);
-      const userId = parts[parts.length - 2];
-      const msgId = parts[parts.length - 3];
-      const key = `${msgId}|${userId}`;
-      const cur = best.get(key);
-      if (!cur || b.pathname < cur) best.set(key, b.pathname);
-    }
-    const byPath = new Map(blobs.map((b) => [b.pathname, b.url]));
-    const rows = await Promise.all(
-      [...best.entries()].map(async ([key, pathname]) => {
-        const url = byPath.get(pathname);
-        const rx = url ? await readJson<Reaction>(url) : null;
-        return rx ? { key, emoji: rx.emoji } : null;
-      })
+    const rows = await q<{ msg_id: string; user_id: string; emoji: string }>(
+      'select msg_id, user_id, emoji from vx_reactions where conv_id = $1',
+      [convId]
     );
     const map: Record<string, Record<string, string>> = {};
-    for (const row of rows) {
-      if (!row || !row.emoji) continue;
-      const [msgId, userId] = row.key.split('|');
-      map[msgId] = { ...(map[msgId] ?? {}), [userId]: row.emoji };
+    for (const r of rows) {
+      if (!r.emoji) continue;
+      map[r.msg_id] = { ...(map[r.msg_id] ?? {}), [r.user_id]: r.emoji };
     }
     return map;
   });
 }
 
-export async function setStar(item: Omit<StarredItem, 'removed'> | null, userId: string, msgId: string) {
+export async function setStar(
+  item: Omit<StarredItem, 'removed'> | null,
+  userId: string,
+  msgId: string
+) {
   const payload: StarredItem = item
     ? { ...item }
     : {
@@ -520,93 +791,129 @@ export async function setStar(item: Omit<StarredItem, 'removed'> | null, userId:
         removed: true,
         snapshot: { text: '', type: 'text', senderName: '', at: 0 },
       };
-  await putJson(`${starPrefix(userId)}/${msgId}/${versionKey()}.json`, payload);
+  await q(
+    `insert into vx_starred (user_id, msg_id, conv_id, conv_name, at, removed, snapshot)
+     values ($1, $2, $3, $4, $5, $6, $7)
+     on conflict (user_id, msg_id) do update set
+       conv_id = excluded.conv_id,
+       conv_name = excluded.conv_name,
+       at = excluded.at,
+       removed = excluded.removed,
+       snapshot = excluded.snapshot`,
+    [
+      userId,
+      msgId,
+      payload.convId ?? '',
+      payload.convName ?? '',
+      payload.at,
+      Boolean(payload.removed),
+      JSON.stringify(payload.snapshot ?? {}),
+    ]
+  );
   invalidate(`star:${userId}`);
 }
 
 export async function getStarred(userId: string): Promise<StarredItem[]> {
   return cached(`star:${userId}`, 3_000, async () => {
-    const { blobs } = await listPrefix(starPrefix(userId), 1000);
-    const best = new Map<string, string>();
-    for (const b of blobs) {
-      const parts = segs(b.pathname);
-      const msgId = parts[parts.length - 2];
-      const cur = best.get(msgId);
-      if (!cur || b.pathname < cur) best.set(msgId, b.pathname);
-    }
-    const byPath = new Map(blobs.map((b) => [b.pathname, b.url]));
-    const rows = await Promise.all(
-      [...best.values()].map(async (pathname) => {
-        const url = byPath.get(pathname);
-        return url ? readJson<StarredItem>(url) : null;
-      })
+    const rows = await q<{
+      user_id: string;
+      msg_id: string;
+      conv_id: string;
+      conv_name: string;
+      at: number;
+      snapshot: StarredItem['snapshot'];
+    }>(
+      `select user_id, msg_id, conv_id, conv_name, at, snapshot
+       from vx_starred where user_id = $1 and removed = false order by at desc`,
+      [userId]
     );
-    return rows
-      .filter((r): r is StarredItem => Boolean(r) && !r!.removed)
-      .sort((a, b) => b.at - a.at);
+    return rows.map((r) => ({
+      userId: r.user_id,
+      msgId: r.msg_id,
+      convId: r.conv_id,
+      convName: r.conv_name,
+      at: Number(r.at),
+      snapshot: r.snapshot,
+    }));
   });
 }
 
 export async function setTyping(convId: string, userId: string): Promise<void> {
-  const current = await cached(`ty:${convId}`, 1_000, () =>
-    newestJson<TypingState>(typingPrefix(convId))
+  const now = Date.now();
+  await q(
+    `insert into vx_typing (conv_id, user_id, at) values ($1, $2, $3)
+     on conflict (conv_id, user_id) do update set at = excluded.at`,
+    [convId, userId, now]
   );
-  const users = { ...(current?.users ?? {}), [userId]: Date.now() };
-  const cutoff = Date.now() - 20_000;
-  for (const [id, at] of Object.entries(users)) if (at < cutoff) delete users[id];
-  await putJson(`${typingPrefix(convId)}/${versionKey()}.json`, {
-    convId,
-    users,
-    at: Date.now(),
-  } satisfies TypingState);
-  invalidate(`ty:${convId}`);
+  // Prune everyone whose typing state has gone stale, which the Blob version did by
+  // rewriting the whole document on every ping.
+  await q('delete from vx_typing where conv_id = $1 and at < $2', [convId, now - 20_000]);
 }
 
 /** userIds currently typing (activity within the last 6 seconds) */
 export async function getTyping(convId: string): Promise<string[]> {
-  const state = await cached(`ty:${convId}`, 900, () =>
-    newestJson<TypingState>(typingPrefix(convId))
+  const rows = await q<{ user_id: string }>(
+    'select user_id from vx_typing where conv_id = $1 and at > $2',
+    [convId, Date.now() - 6_000]
   );
-  const now = Date.now();
-  return Object.entries(state?.users ?? {})
-    .filter(([, at]) => now - at < 6_000)
-    .map(([id]) => id);
+  return rows.map((r) => r.user_id);
 }
 
 export async function heartbeat(userId: string): Promise<void> {
-  await putJson(`${presencePrefix(userId)}/${versionKey()}.json`, {
-    userId,
-    at: Date.now(),
-  } satisfies Presence);
-  invalidate(`pr:${userId}`);
+  await q(
+    `insert into vx_presence (user_id, at) values ($1, $2)
+     on conflict (user_id) do update set at = excluded.at`,
+    [userId, Date.now()]
+  );
 }
 
 export async function getPresence(userId: string): Promise<number> {
-  const p = await cached(`pr:${userId}`, 15_000, () =>
-    newestJson<Presence>(presencePrefix(userId))
-  );
-  return p?.at ?? 0;
+  return cached(`pr:${userId}`, 15_000, async () => {
+    const rows = await q<{ at: number }>('select at from vx_presence where user_id = $1', [userId]);
+    return rows[0] ? Number(rows[0].at) : 0;
+  });
 }
 
 export async function getPresenceMany(ids: string[]): Promise<Record<string, number>> {
-  const rows = await Promise.all(ids.map(async (id) => [id, await getPresence(id)] as const));
-  return Object.fromEntries(rows);
+  if (!ids.length) return {};
+  const rows = await q<{ user_id: string; at: number }>(
+    'select user_id, at from vx_presence where user_id = any($1)',
+    [ids]
+  );
+  const out: Record<string, number> = {};
+  for (const id of ids) out[id] = 0;
+  for (const r of rows) out[r.user_id] = Number(r.at);
+  return out;
 }
 
 export async function createInvite(convId: string, createdBy: string): Promise<Invite> {
   const invite: Invite = { code: rand(11), convId, createdBy, createdAt: Date.now() };
-  await putJson(`${invitePrefix(invite.code)}/${versionKey()}.json`, invite);
+  await q(
+    `insert into vx_invites (code, conv_id, created_by, created_at)
+     values ($1, $2, $3, $4)
+     on conflict (code) do update set conv_id = excluded.conv_id`,
+    [invite.code, invite.convId, invite.createdBy, invite.createdAt]
+  );
   return invite;
 }
 
 export async function getInvite(code: string): Promise<Invite | null> {
   if (!/^[a-z0-9]{6,20}$/.test(code)) return null;
-  return newestJson<Invite>(invitePrefix(code));
+  const rows = await q<{ code: string; conv_id: string; created_by: string; created_at: number }>(
+    'select code, conv_id, created_by, created_at from vx_invites where code = $1',
+    [code]
+  );
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    code: r.code,
+    convId: r.conv_id,
+    createdBy: r.created_by,
+    createdAt: Number(r.created_at),
+  };
 }
 
-/* ==========================================================================
-   Search across the user's own conversations
-   ========================================================================== */
+/* ── search across the user's own conversations ────────────────────────── */
 
 export type SearchHit = {
   convId: string;
@@ -615,9 +922,13 @@ export type SearchHit = {
   messages: { id: string; text: string; at: number; senderName: string; senderId: string }[];
 };
 
-export async function searchMessages(userId: string, query: string, maxConvs = 12): Promise<SearchHit[]> {
-  const q = query.trim().toLowerCase();
-  if (q.length < 2) return [];
+export async function searchMessages(
+  userId: string,
+  query: string,
+  maxConvs = 12
+): Promise<SearchHit[]> {
+  const q2 = query.trim().toLowerCase();
+  if (q2.length < 2) return [];
   const markers = (await listMarkers(userId)).slice(0, maxConvs);
   const hits = await Promise.all(
     markers.map(async (m) => {
@@ -625,7 +936,7 @@ export async function searchMessages(userId: string, query: string, maxConvs = 1
       if (!conv) return null;
       const { messages } = await getMessages(m.convId, { limit: 200 });
       const matched = messages
-        .filter((msg) => msg.type !== 'system' && msg.text && msg.text.toLowerCase().includes(q))
+        .filter((msg) => msg.type !== 'system' && msg.text && msg.text.toLowerCase().includes(q2))
         .slice(-8)
         .map((msg) => ({
           id: msg.id,
