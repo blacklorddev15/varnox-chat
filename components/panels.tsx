@@ -249,6 +249,9 @@ export function ProfilePanel({
   const [displayName, setDisplayName] = useState(me.displayName);
   const [about, setAbout] = useState(me.about);
   const [phone, setPhone] = useState(me.phone ?? '');
+  // An account made from a phone number and a password has no address until it is added
+  // here — it is optional, but it is the only way back in if the number is lost.
+  const [email, setEmail] = useState(me.email ?? '');
   const [avatar, setAvatar] = useState<string | null>(me.avatar);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -280,7 +283,7 @@ export function ProfilePanel({
             type="button"
             className="btn"
             disabled={busy}
-            onClick={() => onSave({ displayName, about, avatar, phone })}
+            onClick={() => onSave({ displayName, about, avatar, phone, email })}
           >
             Save
           </button>
@@ -347,6 +350,24 @@ export function ProfilePanel({
         <p className="hint" style={{ marginTop: 6 }}>
           Include the country code. This is the number you sign in with and the one other people use
           to find you.
+        </p>
+      </div>
+
+      <div className="field-row">
+        <label htmlFor="email">Email address</label>
+        <input
+          id="email"
+          className="input"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
+          inputMode="email"
+          autoComplete="email"
+        />
+        <p className="hint" style={{ marginTop: 6 }}>
+          Optional, and never shown to anyone else. It is how you sign in and how you get back into
+          the account if you lose the number. Clear it to remove it.
         </p>
       </div>
 
