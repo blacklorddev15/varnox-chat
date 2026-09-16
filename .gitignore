@@ -16,3 +16,4 @@ next-env.d.ts
 !.env.example
 .env.local
 .env*.local
+scripts/harness-*.mts

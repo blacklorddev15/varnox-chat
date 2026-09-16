@@ -15,7 +15,7 @@ import { IconLogo } from './icons';
  * accounts created before phone login did have a password and must keep working.
  */
 
-type Step = 'phone' | 'code' | 'name' | 'password' | 'link';
+type Step = 'phone' | 'name' | 'password' | 'link';
 
 type Country = { dial: string; label: string };
 
@@ -63,7 +63,6 @@ const COUNTRIES: Country[] = [
   { dial: '52', label: 'Mexico' },
 ];
 
-const CODE_LENGTH = 6;
 
 /**
  * PLAIN-LANGUAGE PLACEHOLDER, NOT LEGAL ADVICE.
@@ -93,7 +92,6 @@ export function AuthScreen({ next }: { next?: string }) {
   const [country, setCountry] = useState('');
   const [number, setNumber] = useState('');
 
-  const [digits, setDigits] = useState<string[]>(() => Array(CODE_LENGTH).fill(''));
   const [seconds, setSeconds] = useState(0);
 
   const [name, setName] = useState('');
@@ -125,9 +123,7 @@ export function AuthScreen({ next }: { next?: string }) {
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
 
-  const boxes = useRef<Array<HTMLInputElement | null>>([]);
 
   /** The number as the API wants it: "+" and digits only. */
   function composed(): string {
@@ -155,10 +151,6 @@ export function AuthScreen({ next }: { next?: string }) {
     return () => window.clearInterval(id);
   }, [seconds]);
 
-  useEffect(() => {
-    if (step === 'code') boxes.current[0]?.focus();
-  }, [step]);
-
   useEffect(
     () => () => {
       if (photoObjectUrl.current) URL.revokeObjectURL(photoObjectUrl.current);
@@ -176,50 +168,18 @@ export function AuthScreen({ next }: { next?: string }) {
     }
     setBusy(true);
     setError('');
-    try {
-      const res = await post<{ to: string; expiresInSec: number; resendInSec: number }>(
-        '/api/auth/otp/start',
-        { phone }
-      );
-      setDigits(Array(CODE_LENGTH).fill(''));
-      setNotice(`We sent a 6-digit code to ${res.to}`);
-      setSeconds(res.resendInSec || 60);
-      setStep('code');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
-    } finally {
-      setBusy(false);
-    }
+    /* No code is asked for any more. There is no SMS provider, so the only thing the request
+       produced was an error telling somebody to go and watch a phone that would never buzz.
+       The number is taken as given and the flow carries straight on to the name.
+
+       What that gives up: the number is now unverified, and there is no phone-and-code way back
+       in — signing in is by username and password, or by linking a device. Neither is a loss
+       the code was actually preventing: /api/auth/register never checked a code either, so
+       registering with a number that is not yours was already possible by calling it directly. */
+    setStep('name');
+    setBusy(false);
   }
 
-  async function submitCode(value: string) {
-    if (busy || value.length !== CODE_LENGTH) return;
-    setBusy(true);
-    setError('');
-    try {
-      const res = await post<{ user: { displayName: string }; created: boolean }>(
-        '/api/auth/otp/verify',
-        { phone: composed(), code: value }
-      );
-      if (res.created) {
-        setName('');
-        setStep('name');
-      } else {
-        finish();
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
-      setDigits(Array(CODE_LENGTH).fill(''));
-      boxes.current[0]?.focus();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  /**
-   * Sign in with a code from a device that is already signed in. The server sets the session
-   * cookie on the way back, so this leaves through the same door as every other path.
-   */
   async function submitLinkCode(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
@@ -235,45 +195,7 @@ export function AuthScreen({ next }: { next?: string }) {
     }
   }
 
-  function typeDigit(index: number, raw: string) {
-    const typed = raw.replace(/\D/g, '');
-    const next = [...digits];
-
-    if (typed.length > 1) {
-      // A pasted code: fill from here across the remaining boxes.
-      for (let i = 0; i < typed.length && index + i < CODE_LENGTH; i++) {
-        next[index + i] = typed[i];
-      }
-      setDigits(next);
-      const landed = Math.min(CODE_LENGTH - 1, index + typed.length);
-      boxes.current[landed]?.focus();
-      const joined = next.join('');
-      if (joined.length === CODE_LENGTH) void submitCode(joined);
-      return;
-    }
-
-    next[index] = typed;
-    setDigits(next);
-    if (typed && index < CODE_LENGTH - 1) boxes.current[index + 1]?.focus();
-    const joined = next.join('');
-    if (joined.length === CODE_LENGTH) void submitCode(joined);
-  }
-
-  function backspace(index: number) {
-    const next = [...digits];
-    if (next[index]) {
-      next[index] = '';
-      setDigits(next);
-      return;
-    }
-    if (index > 0) {
-      next[index - 1] = '';
-      setDigits(next);
-      boxes.current[index - 1]?.focus();
-    }
-  }
-
-  async function saveName(e: React.FormEvent) {
+      async function saveName(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
     setBusy(true);
@@ -431,8 +353,8 @@ export function AuthScreen({ next }: { next?: string }) {
           <>
             <h1>Enter your phone number</h1>
             <p className="sub">
-              Varnox will send you a 6-digit code to confirm it is you. Your number is how
-              people find you and how you sign in.
+              Your number is how people find you on Varnox. You will pick a username and a
+              password next, and that is how you sign in.
             </p>
             <form onSubmit={sendCode}>
               <div className="field-row">
@@ -467,7 +389,7 @@ export function AuthScreen({ next }: { next?: string }) {
                 />
                 <p className="hint" style={{ marginTop: 6 }}>
                   {country
-                    ? `We'll send the code to ${composed()}`
+                    ? `Your number will be ${composed()}`
                     : 'Include the country code, for example +65 9123 4567.'}
                 </p>
               </div>
@@ -475,15 +397,15 @@ export function AuthScreen({ next }: { next?: string }) {
               {error ? <p className="error">{error}</p> : null}
 
               <button className="btn" type="submit" disabled={busy}>
-                {busy ? 'Sending…' : 'Send code'}
+                Continue
               </button>
             </form>
 
             <div className="switch-line">
-              <button type="button" onClick={() => { setStep('password'); setError(''); setNotice(''); }}>
+              <button type="button" onClick={() => { setStep('password'); setError(''); }}>
                 Use a password instead
               </button>
-              <button type="button" onClick={() => { setStep('link'); setError(''); setNotice(''); }}>
+              <button type="button" onClick={() => { setStep('link'); setError(''); }}>
                 Link a device
               </button>
             </div>
@@ -492,111 +414,6 @@ export function AuthScreen({ next }: { next?: string }) {
               Messages stay on your own Varnox server and are not shared with any other
               messenger.
             </p>
-          </>
-        ) : null}
-
-        {step === 'code' ? (
-          <>
-            <h1>Enter the code</h1>
-            <p className="sub">{notice}</p>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void submitCode(digits.join(''));
-              }}
-            >
-              <div className="otp-boxes">
-                {digits.map((digit, i) => (
-                  <input
-                    key={i}
-                    ref={(el) => {
-                      boxes.current[i] = el;
-                    }}
-                    className="input otp-box"
-                    value={digit}
-                    onChange={(e) => typeDigit(i, e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Backspace') {
-                        e.preventDefault();
-                        backspace(i);
-                      }
-                    }}
-                    onPaste={(e) => {
-                      const pasted = e.clipboardData.getData('text');
-                      if (!pasted) return;
-                      e.preventDefault();
-                      typeDigit(i, pasted);
-                    }}
-                    inputMode="numeric"
-                    autoComplete={i === 0 ? 'one-time-code' : 'off'}
-                    aria-label={`Digit ${i + 1}`}
-                  />
-                ))}
-              </div>
-
-              {error ? <p className="error">{error}</p> : null}
-
-              <button className="btn" type="submit" disabled={busy || digits.join('').length !== CODE_LENGTH}>
-                {busy ? 'Checking…' : 'Confirm'}
-              </button>
-            </form>
-
-            <div className="switch-line">
-              {seconds > 0 ? (
-                <span className="hint">You can ask for a new code in {seconds}s</span>
-              ) : (
-                <button type="button" onClick={() => void sendCode()} disabled={busy}>
-                  Send a new code
-                </button>
-              )}
-              <button type="button" onClick={() => { setStep('phone'); setError(''); setNotice(''); }}>
-                Change number
-              </button>
-            </div>
-          </>
-        ) : null}
-
-        {step === 'link' ? (
-          <>
-            <h1>Link a device</h1>
-            <p className="sub">
-              On a device that is already signed in to Varnox, open Settings, choose Linked
-              devices and tap Link a device. Type the code it shows here.
-            </p>
-            <form onSubmit={submitLinkCode}>
-              <div className="field-row">
-                <label htmlFor="link-code">Code from your other device</label>
-                <input
-                  id="link-code"
-                  className="input"
-                  value={linkCode}
-                  onChange={(e) => setLinkCode(e.target.value)}
-                  placeholder="ABCD2345"
-                  autoComplete="off"
-                  autoCapitalize="characters"
-                  autoFocus
-                  required
-                />
-                <p className="hint" style={{ marginTop: 6 }}>
-                  The code lasts two minutes and only works once.
-                </p>
-              </div>
-
-              {error ? <p className="error">{error}</p> : null}
-
-              <button className="btn" type="submit" disabled={busy || linkCode.trim().length < 8}>
-                {busy ? 'Linking…' : 'Link this device'}
-              </button>
-            </form>
-
-            <div className="switch-line">
-              <button type="button" onClick={() => { setStep('phone'); setError(''); }}>
-                Use a phone code instead
-              </button>
-              <button type="button" onClick={() => { setStep('password'); setError(''); }}>
-                Use a password instead
-              </button>
-            </div>
           </>
         ) : null}
 
