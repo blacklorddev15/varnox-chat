@@ -1,0 +1,64 @@
+import { q } from '@/lib/pg';
+
+export const dynamic = 'force-dynamic';
+
+/**
+ * Deployment health: is the database the shape this code expects?
+ *
+ * It exists because a deploy and a migration can get out of step. The code ships, the
+ * schema change does not run, and the symptom is a handful of unrelated-looking failures —
+ * a display picture that will not save, a signup that errors, an email login that 500s.
+ * Asking the database directly turns that hunt into a one-line answer.
+ *
+ * The missing-object names are safe to return publicly: this repository is public, so the
+ * schema is not a secret. Nothing here exposes data or credentials.
+ */
+const REQUIRED_TABLES = ['vx_users', 'vx_convs', 'vx_messages', 'vx_otp', 'vx_otp_rate'];
+const REQUIRED_COLUMNS: { table: string; column: string }[] = [
+  { table: 'vx_users', column: 'email' },
+];
+
+export async function GET() {
+  try {
+    const tables = await q<{ table_name: string }>(
+      `select table_name from information_schema.tables
+        where table_schema = 'public' and table_name = any($1::text[])`,
+      [REQUIRED_TABLES]
+    );
+    const presentTables = new Set(tables.map((r) => r.table_name));
+    const missingTables = REQUIRED_TABLES.filter((t) => !presentTables.has(t));
+
+    const columns = await q<{ table_name: string; column_name: string }>(
+      `select table_name, column_name from information_schema.columns
+        where table_schema = 'public'
+          and table_name = any($1::text[])
+          and column_name = any($2::text[])`,
+      [REQUIRED_COLUMNS.map((c) => c.table), REQUIRED_COLUMNS.map((c) => c.column)]
+    );
+    const presentColumns = new Set(columns.map((r) => `${r.table_name}.${r.column_name}`));
+    const missingColumns = REQUIRED_COLUMNS.map((c) => `${c.table}.${c.column}`).filter(
+      (key) => !presentColumns.has(key)
+    );
+
+    const missing = [...missingTables, ...missingColumns];
+    const ready = missing.length === 0;
+
+    return Response.json(
+      ready
+        ? { ok: true, schema: 'up to date' }
+        : {
+            ok: false,
+            missing,
+            fix: 'Run the migration: npm run db:apply — or paste db/schema.sql into your database console.',
+          },
+      { status: ready ? 200 : 503, headers: { 'Cache-Control': 'no-store' } }
+    );
+  } catch (err) {
+    // "Cannot connect" is a different problem from "missing column", and saying which one
+    // it is stops someone chasing the wrong cause.
+    return Response.json(
+      { ok: false, error: err instanceof Error ? err.message : 'database unreachable' },
+      { status: 503, headers: { 'Cache-Control': 'no-store' } }
+    );
+  }
+}
