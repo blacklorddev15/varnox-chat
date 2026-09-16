@@ -1,5 +1,5 @@
 import { requireUser } from '@/lib/auth';
-import { bad, handle, ok, readJsonBody } from '@/lib/api';
+import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
 import { MAX_SIGNAL_PAYLOAD, addCallSignal } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
@@ -11,10 +11,22 @@ const KINDS = ['offer', 'answer', 'candidate'] as const;
 type Body = {
   kind?: string;
   payload?: string;
+  /**
+   * Which peer this signal is for.
+   *
+   * Omit it on a one-to-one call, where there is only ever one other person and the signal is
+   * for them by definition — left out, it stays readable by both sides exactly as it always was.
+   *
+   * A call with three or more people must set it. An offer and an ICE candidate each belong to
+   * a single peer, so an unaddressed one is read by everybody, and each of them tries to answer
+   * something that was addressed to somebody else. That is the specific failure this field
+   * exists to prevent.
+   */
+  to?: string;
 };
 
 /**
- * Post one signal to the other side.
+ * Post one signal.
  *
  * There is no WebSocket, so this is how an offer, an answer or an ICE candidate crosses: it is
  * written to vx_call_signals and the other browser reads it on its next poll, by cursor.
@@ -38,7 +50,12 @@ export async function POST(req: Request, ctx: Ctx) {
     if (!payload) return bad('An empty call signal cannot be sent');
     if (payload.length > MAX_SIGNAL_PAYLOAD) return bad('That call signal is too large');
 
-    await addCallSignal(id, me.id, kind, payload);
+    // Absent means broadcast, which is what a one-to-one client sends. Handing that straight
+    // through is what keeps the existing one-to-one screens working untouched.
+    const to = clean(body.to, 80) || null;
+    if (to && to === me.id) return bad('A call signal cannot be addressed to its own sender');
+
+    await addCallSignal(id, me.id, kind, payload, to);
     return ok({ sent: true });
   });
 }

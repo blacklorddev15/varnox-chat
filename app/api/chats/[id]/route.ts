@@ -2,7 +2,13 @@ import { requireUser } from '@/lib/auth';
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
 import { chatSummaries, getConv, getConvReads, getUser } from '@/lib/db';
 import { buildChatRow, emptySummary } from '@/lib/present';
-import { hideConvFor, refreshConv } from '@/lib/service';
+import {
+  describeMembers,
+  hideConvFor,
+  namesFor,
+  recordGroupEvent,
+  refreshConv,
+} from '@/lib/service';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,14 +75,22 @@ export async function PATCH(req: Request, ctx: Ctx) {
       avatar = body.avatar ? clean(body.avatar, 500) : null;
     }
 
+    // Only genuine changes are collected. Re-adding somebody who is already in the group is not
+    // an event, and an entry claiming something happened when nothing did is worse than no entry.
+    const addedIds: string[] = [];
+
     if (Array.isArray(body.addMembers) && body.addMembers.length) {
       for (const raw of body.addMembers.slice(0, 100)) {
         const uid = String(raw);
         if (uid === me.id) continue;
         const user = await getUser(uid);
-        if (user) members.add(uid);
+        if (!user) continue;
+        if (!members.has(uid)) addedIds.push(uid);
+        members.add(uid);
       }
     }
+
+    const removedIds: string[] = [];
 
     if (Array.isArray(body.removeMembers) && body.removeMembers.length) {
       if (!isGroup) return bad('You cannot remove anyone from a direct chat');
@@ -84,6 +98,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
       for (const raw of body.removeMembers.slice(0, 100)) {
         const uid = String(raw);
         if (uid === me.id) continue;
+        if (members.has(uid)) removedIds.push(uid);
         members.delete(uid);
         const stillThere = await getConv(conv.id);
         if (stillThere) await hideConvFor({ ...stillThere, members: [uid] }, uid);
@@ -109,6 +124,25 @@ export async function PATCH(req: Request, ctx: Ctx) {
       admins: conv.admins.filter((a) => members.has(a)),
     };
     await refreshConv(next);
+
+    // Written after the member list is saved, so each event reaches exactly the people it
+    // should: whoever just joined sees it, whoever just left does not.
+    if (addedIds.length) {
+      await recordGroupEvent(
+        me,
+        next,
+        `${me.displayName} added ${describeMembers(await namesFor(addedIds))}`
+      );
+    }
+
+    if (removedIds.length) {
+      await recordGroupEvent(
+        me,
+        next,
+        `${me.displayName} removed ${describeMembers(await namesFor(removedIds))}`
+      );
+    }
+
     return ok({ conv: next });
   });
 }
@@ -132,6 +166,15 @@ export async function DELETE(_req: Request, ctx: Ctx) {
       await refreshConv(next, remaining);
     }
     await hideConvFor(conv, me.id);
+
+    // The people still in the group are told. This deliberately targets `next`, not the
+    // conversation the leaver was in — they have just hidden it, and telling somebody about an
+    // event they can no longer see is pointless. When the last member leaves there is nobody
+    // left to tell, so nothing is written.
+    if (next.members.length) {
+      await recordGroupEvent(me, next, `${me.displayName} left`);
+    }
+
     return ok({ left: true });
   });
 }

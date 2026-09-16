@@ -2,7 +2,7 @@ import { requireUser } from '@/lib/auth';
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
 import { chatSummaries, getConv, getInvite } from '@/lib/db';
 import { buildChatRow } from '@/lib/present';
-import { refreshConv } from '@/lib/service';
+import { recordGroupEvent, refreshConv } from '@/lib/service';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,6 +23,9 @@ export async function POST(req: Request) {
     if (!conv.members.includes(me.id)) {
       const next = { ...conv, members: [...conv.members, me.id] };
       await refreshConv(next);
+      // Existing members are told who joined. Delivered against `next` so the person joining
+      // sees it in the thread too, rather than arriving to a group with no sign they joined.
+      await recordGroupEvent(me, next, `${me.displayName} joined using an invite link`);
     }
 
     const rows = await chatSummaries(me.id);

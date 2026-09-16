@@ -1,6 +1,11 @@
 import { requireUser } from '@/lib/auth';
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
-import { listCallHistory, startCall, takeRateSlot } from '@/lib/db';
+import {
+  listCallHistory,
+  startCall,
+  startGroupCall,
+  takeRateSlot,
+} from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +29,10 @@ export async function GET() {
 }
 
 type Body = {
+  /** One-to-one: the single person being called. */
   calleeId?: string;
+  /** Group: everybody being called at once. Takes precedence over calleeId when present. */
+  calleeIds?: string[];
   kind?: string;
 };
 
@@ -33,8 +41,15 @@ export async function POST(req: Request) {
     const me = await requireUser();
     const body = await readJsonBody<Body>(req);
 
+    // Two accepted shapes rather than one union, because they mean different things: calleeId is
+    // a one-to-one call, calleeIds is a group call, and the call record differs — a group call
+    // has no callee_id at all.
+    const many = Array.isArray(body.calleeIds)
+      ? body.calleeIds.map((id) => clean(id, 80)).filter((id): id is string => Boolean(id)).slice(0, 32)
+      : [];
+
     const calleeId = clean(body.calleeId, 80);
-    if (!calleeId) return bad('Choose someone to call');
+    if (!many.length && !calleeId) return bad('Choose someone to call');
 
     const kind = KINDS.find((k) => k === body.kind);
     if (!kind) return bad('A call must be audio or video');
@@ -47,6 +62,10 @@ export async function POST(req: Request) {
       return bad(`You have started too many calls. Try again in ${seconds}s.`, 429);
     }
 
-    return ok({ call: await startCall(me.id, calleeId, kind) }, 201);
+    const call = many.length
+      ? await startGroupCall(me.id, many, kind)
+      : await startCall(me.id, calleeId as string, kind);
+
+    return ok({ call }, 201);
   });
 }

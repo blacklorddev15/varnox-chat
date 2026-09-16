@@ -5,7 +5,9 @@ import { newId, rand } from './ids';
 import { q } from './pg';
 import { looksLikePhone, phoneKey } from './phone';
 import type {
+  BotThreadMessage,
   Call,
+  CallParticipant,
   CallSignal,
   Channel,
   ChannelFollower,
@@ -2171,7 +2173,9 @@ export const MAX_SIGNAL_PAYLOAD = 20_000;
 type CallRow = {
   id: string;
   caller_id: string;
+  /** The person called on a one-to-one call, or the first person invited on a group call. */
   callee_id: string;
+  is_group: boolean;
   kind: string;
   status: string;
   created_at: number;
@@ -2180,8 +2184,41 @@ type CallRow = {
   ended_by: string | null;
 };
 
+/**
+ * "This user is on this call", as one SQL predicate.
+ *
+ * Two ways in, and the second is not redundant. A participant row is how every call made from
+ * now on is described. caller_id and callee_id are how calls made *before* group calls existed
+ * are described — they have no participant rows and there is deliberately no backfill for them.
+ *
+ * Written once rather than at each of the six call sites, because a rule re-derived per site is
+ * a rule that eventually differs between them.
+ */
+function isParticipant(param: number): string {
+  const p = `$${param}`;
+  return `(exists (select 1 from vx_call_participants p
+                    where p.call_id = c.id and p.user_id = ${p})
+           or c.caller_id = ${p} or c.callee_id = ${p})`;
+}
+
+/**
+ * "This user has been asked to join and has not answered yet."
+ *
+ * Two forms for the same reason as isParticipant: an 'invited' row is how a call made now is
+ * described, while callee_id on a call with no participant rows at all is how a call made before
+ * group calls existed is described. Being *invited* is the real rule for answering — "the
+ * callee" was only ever the one-to-one way of saying it.
+ */
+function isInvited(param: number): string {
+  const p = `$${param}`;
+  return `(exists (select 1 from vx_call_participants p
+                    where p.call_id = c.id and p.user_id = ${p} and p.state = 'invited')
+           or (c.callee_id = ${p}
+               and not exists (select 1 from vx_call_participants p2 where p2.call_id = c.id)))`;
+}
+
 const CALL_COLUMNS = `c.id, c.caller_id, c.callee_id, c.kind, c.status,
-  c.created_at, c.answered_at, c.ended_at, c.ended_by`;
+  c.created_at, c.answered_at, c.ended_at, c.ended_by, c.is_group`;
 
 /**
  * A row's status as it should be read *now*: a ringing call that has been ringing for longer
@@ -2202,11 +2239,74 @@ function callStatus(status: string, createdAt: number, now: number): Call['statu
  * Null when the other account is gone: a call to a user who no longer exists has no name or
  * picture to draw, and both callers (the live read and the history list) simply drop it.
  */
+/**
+ * Users by id, in the order given, each with the same avatar projection the updates screen and
+ * the follower list apply. Ids that no longer resolve are dropped.
+ *
+ * One lookup per id, but getUser and getSettings are both cached for a few seconds, so a list
+ * where the same handful of people appear over and over stays a handful of queries.
+ */
+async function toPublic(ids: string[]): Promise<PublicUser[]> {
+  const users = await Promise.all(ids.map((id) => getUser(id)));
+  const out: PublicUser[] = [];
+  for (let i = 0; i < ids.length; i += 1) {
+    const user = users[i];
+    if (!user) continue;
+    const settings = await getSettings(ids[i]);
+    out.push({
+      ...toPublicUser(user),
+      avatar: settings.privacy.profilePhoto !== 'nobody' ? user.avatar : null,
+    });
+  }
+  return out;
+}
+
 async function toCall(r: CallRow, viewerId: string, now: number): Promise<Call | null> {
-  const peerId = r.caller_id === viewerId ? r.callee_id : r.caller_id;
-  const peer = await getUser(peerId);
+  const rows = await q<{ user_id: string; state: string }>(
+    `select user_id, state from vx_call_participants
+      where call_id = $1
+      order by invited_at asc, user_id asc`,
+    [r.id]
+  );
+
+  // No participant rows means a call made before group calls existed. Its two columns are
+  // already the complete participant list, so nothing needs migrating to read it — and both are
+  // reported as having been on it, because the missing rows cannot say otherwise and for history
+  // that is the truthful summary.
+  const entries = rows.length
+    ? rows.map((row) => ({ id: row.user_id, state: participantState(row.state) }))
+    : [r.caller_id, ...(r.callee_id ? [r.callee_id] : [])].map((id) => ({
+        id,
+        state: 'joined' as const,
+      }));
+
+  const stateById = new Map(entries.map((entry) => [entry.id, entry.state]));
+  const participants: CallParticipant[] = (await toPublic(entries.map((e) => e.id)))
+    .map((user) => ({ user, state: stateById.get(user.id) ?? 'joined' }))
+    // The caller first. invited_at cannot express this, because everybody added at creation
+    // shares one timestamp — and the tile grid reads better with whoever started it at the top.
+    .sort((a, b) => {
+      if (a.user.id === r.caller_id) return -1;
+      if (b.user.id === r.caller_id) return 1;
+      return 0;
+    });
+
+  // The one-to-one screens need one person to draw. On a group call that is the caller — or,
+  // for the caller themselves, whoever else is on it. A compatibility choice, not a claim that
+  // a group call has a "peer"; a group screen should draw `participants`.
+  // On a one-to-one call this is simply the other person. On a group call it is the first
+  // invitee — somebody who really is being called — which is a truthful enough answer for a line
+  // that asks "who is this about". A group screen draws `participants` instead.
+  const peerId =
+    r.caller_id === viewerId
+      ? r.callee_id || entries.find((e) => e.id !== viewerId)?.id || null
+      : r.caller_id;
+
+  const peer = participants.find((p) => p.user.id === peerId);
+  // The other end is gone. Both callers of this (the live read and the history list) drop it,
+  // which is what they already did when the peer user had been deleted.
   if (!peer) return null;
-  const settings = await getSettings(peerId);
+
   const status = callStatus(r.status, Number(r.created_at), now);
   const answeredAt = r.answered_at === null ? null : Number(r.answered_at);
   const endedAt = r.ended_at === null ? null : Number(r.ended_at);
@@ -2214,17 +2314,16 @@ async function toCall(r: CallRow, viewerId: string, now: number): Promise<Call |
     id: r.id,
     callerId: r.caller_id,
     calleeId: r.callee_id,
+    isGroup: r.is_group === true,
     kind: r.kind === 'video' ? 'video' : 'audio',
     status,
     createdAt: Number(r.created_at),
     answeredAt,
     endedAt,
     endedBy: r.ended_by ?? null,
-    peer: {
-      ...toPublicUser(peer),
-      // The same projection the updates screen and the follower list apply.
-      avatar: settings.privacy.profilePhoto !== 'nobody' ? peer.avatar : null,
-    },
+    // The one-to-one screens want a person, not a roster entry.
+    peer: peer.user,
+    participants,
     direction: r.caller_id === viewerId ? 'outgoing' : 'incoming',
     missed: status === 'missed',
     // A call that was never answered has no duration, which is also what tells the list to
@@ -2242,21 +2341,35 @@ async function toCall(r: CallRow, viewerId: string, now: number): Promise<Call |
  * caller that is told the wrong one wastes their time.
  */
 async function callRefusal(callId: string, userId: string, action: string): Promise<Error> {
-  const rows = await q<{ caller_id: string; callee_id: string; status: string; created_at: number }>(
-    `select caller_id, callee_id, status, created_at from vx_calls where id = $1`,
-    [callId]
-  );
+  const rows = await q<{
+    caller_id: string;
+    callee_id: string;
+    status: string;
+    created_at: number;
+  }>(`select caller_id, callee_id, status, created_at from vx_calls where id = $1`, [callId]);
+
   const row = rows[0];
   if (!row) return new Error('Call not found');
+
   if (row.caller_id !== userId && row.callee_id !== userId) {
-    return new Error('Forbidden: that call is not yours');
+    // A group call has no callee, so the two columns above cannot decide this on their own.
+    // Asked of the participants table before being told the call is not theirs, because a
+    // member of the group being told "that call is not yours" is a lie that wastes their time.
+    const member = await q<{ user_id: string }>(
+      `select user_id from vx_call_participants where call_id = $1 and user_id = $2`,
+      [callId, userId]
+    );
+    if (!member.length) return new Error('Forbidden: that call is not yours');
   }
+
   if (row.status === 'ringing' && Number(row.created_at) <= Date.now() - CALL_RING_MS) {
     return new Error('Forbidden: this call is no longer ringing');
   }
   if (row.status === 'accepted') return new Error('Forbidden: this call is already answered');
   if (row.status !== 'ringing') return new Error('Forbidden: this call has already finished');
-  return new Error(`Forbidden: only the receiver can ${action} a call`);
+  // "Receiver" was the one-to-one word. On a group call there are several people being rung, so
+  // the rule is about whether you were invited, not about which side you are on.
+  return new Error(`Forbidden: only somebody being called can ${action} this call`);
 }
 
 /**
@@ -2270,7 +2383,7 @@ export async function callFor(callId: string, userId: string): Promise<Call | nu
   if (!callId) return null;
   const rows = await q<CallRow>(
     `select ${CALL_COLUMNS} from vx_calls c
-      where c.id = $1 and (c.caller_id = $2 or c.callee_id = $2)
+      where c.id = $1 and ${isParticipant(2)}
       limit 1`,
     [callId, userId]
   );
@@ -2288,6 +2401,77 @@ export async function callFor(callId: string, userId: string): Promise<Call | nu
  * A live call here means accepted, or ringing inside its window — the same rule getLiveCall
  * reads by, so a call that has aged out cannot keep either party busy forever.
  */
+/**
+ * The most people one call is allowed to carry.
+ *
+ * The server has no real opinion — it stores whatever it is told. The cap is here because the
+ * client joins every participant directly to every other, so each person uploads one stream per
+ * peer: at six, a phone is sending five. It stops being usable well before it stops being
+ * possible, and the answer to that is a media server rather than a bigger number here.
+ */
+export const MAX_CALL_PARTICIPANTS = 6;
+
+/**
+ * Record who is on a call.
+ *
+ * `on conflict do nothing` rather than an update: this is called when a call is created and
+ * again when it is answered, and a second call must not reset somebody's joined_at or drag them
+ * back to 'invited'.
+ */
+async function addParticipants(
+  callId: string,
+  entries: { userId: string; state: 'invited' | 'joined' }[]
+): Promise<void> {
+  if (!entries.length) return;
+
+  const now = Date.now();
+  const params: (string | number | null)[] = [callId];
+
+  // joined_at is only set for somebody already on the call — the caller at creation, everyone
+  // else when they answer. Epoch milliseconds, like every other call timestamp.
+  //
+  // Every placeholder is cast explicitly. Left to inference, `$n` appearing both as a value and
+  // inside a CASE with a null branch is deduced as text on one use and bigint on the other, and
+  // Postgres refuses the statement outright rather than picking one.
+  const values = entries.map((entry, i) => {
+    const u = i * 4 + 2;
+    params.push(entry.userId, entry.state, now, entry.state === 'joined' ? now : null);
+    return `($1::text, $${u}::text, $${u + 1}::text, $${u + 2}::bigint, $${u + 3}::bigint)`;
+  });
+
+  await q(
+    `insert into vx_call_participants (call_id, user_id, state, invited_at, joined_at)
+     values ${values.join(', ')}
+     on conflict (call_id, user_id) do nothing`,
+    params
+  );
+}
+
+/**
+ * A participant's state, narrowed to the four this app writes.
+ *
+ * Anything unrecognised is reported as 'joined' rather than hidden. A state this code does not
+ * know about is far more likely to be something new than something wrong, and drawing somebody
+ * as absent while they are actually on the call is the worse of the two mistakes.
+ */
+function participantState(state: string): CallParticipant['state'] {
+  if (state === 'invited' || state === 'left' || state === 'declined') return state;
+  return 'joined';
+}
+
+/** Is this user on a live call — either side, or as a participant? */
+async function userIsBusy(userId: string, now: number): Promise<boolean> {
+  const rows = await q<{ id: string }>(
+    `select c.id from vx_calls c
+      where ${isParticipant(1)}
+        and (c.status = 'accepted'
+             or (c.status = 'ringing' and c.created_at > $2))
+      limit 1`,
+    [userId, now - CALL_RING_MS]
+  );
+  return rows.length > 0;
+}
+
 export async function startCall(
   callerId: string,
   calleeId: string,
@@ -2299,16 +2483,15 @@ export async function startCall(
   const rows = await q<{ id: string }>(
     `insert into vx_calls (id, caller_id, callee_id, kind, status, created_at)
      select $1, $2, u.id, $3, 'ringing', $4
-       from vx_users u
-      where u.id = $5
-        and u.id <> $2
-        and not exists (
-          select 1 from vx_calls c
-           where (c.caller_id = $2 or c.callee_id = $2
-                  or c.caller_id = $5 or c.callee_id = $5)
-             and (c.status = 'accepted'
-                  or (c.status = 'ringing' and c.created_at > $6))
-        )
+        from vx_users u
+       where u.id = $5
+         and u.id <> $2
+         and not exists (
+           select 1 from vx_calls c
+            where (${isParticipant(2)} or ${isParticipant(5)})
+              and (c.status = 'accepted'
+                   or (c.status = 'ringing' and c.created_at > $6))
+         )
      returning id`,
     [id, callerId, kind, now, calleeId, now - CALL_RING_MS]
   );
@@ -2317,19 +2500,79 @@ export async function startCall(
     if (callerId === calleeId) throw new Error('Forbidden: you cannot call yourself');
     const peer = await q<{ id: string }>(`select id from vx_users where id = $1`, [calleeId]);
     if (!peer.length) throw new Error('That person was not found');
-    const mine = await q<{ id: string }>(
-      `select c.id from vx_calls c
-        where (c.caller_id = $1 or c.callee_id = $1)
-          and (c.status = 'accepted' or (c.status = 'ringing' and c.created_at > $2))
-        limit 1`,
-      [callerId, now - CALL_RING_MS]
-    );
     throw new Error(
-      mine.length
+      (await userIsBusy(callerId, now))
         ? 'Forbidden: you are already on a call'
         : 'Forbidden: that person is already on a call'
     );
   }
+
+  await addParticipants(id, [
+    { userId: callerId, state: 'joined' },
+    { userId: calleeId, state: 'invited' },
+  ]);
+
+  const call = await callFor(id, callerId);
+  if (!call) throw new Error('Call not found');
+  return call;
+}
+
+/**
+ * Start a call with several people on it.
+ *
+ * Differs from startCall in one way that matters: an invitee who is already on a call is
+ * *skipped* rather than failing the whole thing. Ringing somebody who is mid-call does nothing
+ * but confuse them, and one busy person should not be able to veto a group call for everybody
+ * else. If nobody is left to ring, that is a real failure and is said so.
+ *
+ * caller_id stays the single caller, and callee_id is left null — a group call has no second
+ * party, which is the whole reason the participants table exists.
+ */
+export async function startGroupCall(
+  callerId: string,
+  calleeIds: string[],
+  kind: Call['kind']
+): Promise<Call> {
+  if (kind !== 'audio' && kind !== 'video') throw new Error('A call must be audio or video');
+
+  const now = Date.now();
+
+  if (await userIsBusy(callerId, now)) throw new Error('Forbidden: you are already on a call');
+
+  // Deduplicated and without the caller: being on your own call list is not an invitation.
+  const wanted = Array.from(new Set(calleeIds.map(String))).filter((id) => id && id !== callerId);
+  if (!wanted.length) throw new Error('Pick at least one person to call');
+  if (wanted.length + 1 > MAX_CALL_PARTICIPANTS) {
+    throw new Error(`A call can hold ${MAX_CALL_PARTICIPANTS} people`);
+  }
+
+  // Only accounts that exist, and only ones who are free.
+  const found = await q<{ id: string }>(
+    `select id from vx_users where id = any($1::text[])`,
+    [wanted]
+  );
+  const known = new Set(found.map((row) => row.id));
+
+  const invite: string[] = [];
+  for (const id of wanted) {
+    if (known.has(id) && !(await userIsBusy(id, now))) invite.push(id);
+  }
+
+  if (!invite.length) {
+    throw new Error('Forbidden: everybody you picked is already on a call');
+  }
+
+  const id = newId('call');
+  await q(
+    `insert into vx_calls (id, caller_id, callee_id, kind, status, created_at, is_group)
+     values ($1, $2, $3, $4, 'ringing', $5, true)`,
+    [id, callerId, invite[0], kind, now]
+  );
+
+  await addParticipants(id, [
+    { userId: callerId, state: 'joined' },
+    ...invite.map((userId) => ({ userId, state: 'invited' as const })),
+  ]);
 
   const call = await callFor(id, callerId);
   if (!call) throw new Error('Call not found');
@@ -2348,7 +2591,7 @@ export async function getLiveCall(userId: string): Promise<Call | null> {
   const now = Date.now();
   const rows = await q<CallRow>(
     `select ${CALL_COLUMNS} from vx_calls c
-      where (c.caller_id = $1 or c.callee_id = $1)
+      where ${isParticipant(1)}
         and (c.status = 'accepted'
              or (c.status = 'ringing' and c.created_at > $2))
       order by c.created_at desc
@@ -2370,7 +2613,7 @@ export async function listCallHistory(userId: string, limit = 50): Promise<Call[
   const now = Date.now();
   const rows = await q<CallRow>(
     `select ${CALL_COLUMNS} from vx_calls c
-      where c.caller_id = $1 or c.callee_id = $1
+      where ${isParticipant(1)}
       order by c.created_at desc
       limit $2`,
     [userId, capped]
@@ -2393,13 +2636,92 @@ export async function listCallHistory(userId: string, limit = 50): Promise<Call[
 export async function acceptCall(callId: string, userId: string): Promise<Call> {
   const now = Date.now();
   const rows = await q<{ id: string }>(
-    `update vx_calls
-        set status = 'accepted', answered_at = $3
-      where id = $1 and callee_id = $2 and status = 'ringing' and created_at > $4
+    `update vx_calls c
+        set status = 'accepted',
+            answered_at = coalesce(c.answered_at, $3)
+      where c.id = $1
+        and ${isInvited(2)}
+        -- 'accepted' is allowed through as well as a live ring, because a group call is already
+        -- under way by the time the third person picks up. The thing that stops a second person
+        -- answering a one-to-one call is that nobody is left 'invited' on it.
+        and ((c.status = 'ringing' and c.created_at > $4) or c.status = 'accepted')
       returning id`,
     [callId, userId, now, now - CALL_RING_MS]
   );
+
   if (!rows.length) throw await callRefusal(callId, userId, 'accept');
+
+  // The caller is already 'joined'; this moves whoever just answered across. It deliberately
+  // cannot be what decides whether the call was answered: a call made before this table existed
+  // has no row to move.
+  await q(
+    `update vx_call_participants
+        set state = 'joined', joined_at = coalesce(joined_at, $3)
+      where call_id = $1 and user_id = $2 and state = 'invited'`,
+    [callId, userId, now]
+  );
+
+  const call = await callFor(callId, userId);
+  if (!call) throw new Error('Call not found');
+  return call;
+}
+
+/**
+ * End the call for everybody, if nobody is left on it.
+ *
+ * Called after somebody leaves or declines so that a call which has run out of people stops
+ * ringing rather than sitting there until its window expires.
+ */
+async function endIfEmpty(callId: string, now: number): Promise<void> {
+  await q(
+    `update vx_calls c
+        set status = 'ended', ended_at = $2
+      where c.id = $1
+        -- "Empty" means something different depending on where the call is, and asking the
+        -- wrong question leaves it stranded either way.
+        --
+        -- While it is still ringing, the people who matter are the ones who have not answered:
+        -- a caller sitting on a call that nobody is being rung for any more is just waiting for
+        -- the window to expire. Counting the caller as "still in it" here is what leaves that
+        -- call ringing into the void.
+        --
+        -- Once it is up, the people who matter are the ones actually on it. Nobody joined means
+        -- nobody left to talk to.
+        and (
+          (c.status = 'ringing'
+           and not exists (select 1 from vx_call_participants p
+                            where p.call_id = c.id and p.state = 'invited'))
+          or
+          (c.status = 'accepted'
+           and not exists (select 1 from vx_call_participants p
+                            where p.call_id = c.id and p.state = 'joined'))
+        )`,
+    [callId, now]
+  );
+}
+
+/**
+ * Leave a call without taking it away from everybody else.
+ *
+ * A group call needs this and a one-to-one call never did: on a one-to-one call hanging up *is*
+ * the end, so endCall covers it. With three or more people, one of them putting the phone down
+ * must not end it for the rest.
+ *
+ * Ends the call only when nobody is left in it — which is also correct for one-to-one, since
+ * the single other participant leaving empties it.
+ */
+export async function leaveCall(callId: string, userId: string): Promise<Call> {
+  const now = Date.now();
+  const rows = await q<{ user_id: string }>(
+    `update vx_call_participants
+        set state = 'left', left_at = $3
+      where call_id = $1 and user_id = $2 and state in ('invited', 'joined')
+      returning user_id`,
+    [callId, userId, now]
+  );
+  if (!rows.length) throw await callRefusal(callId, userId, 'leave');
+  await endIfEmpty(callId, now);
+
   const call = await callFor(callId, userId);
   if (!call) throw new Error('Call not found');
   return call;
@@ -2408,14 +2730,36 @@ export async function acceptCall(callId: string, userId: string): Promise<Call> 
 /** Refuse a call: the callee, while it is still ringing. */
 export async function declineCall(callId: string, userId: string): Promise<Call> {
   const now = Date.now();
-  const rows = await q<{ id: string }>(
+
+  // A one-to-one call is over the moment the person being rung says no. `not is_group` is what
+  // identifies one: matching on callee_id alone would let the first invitee of a group call take
+  // this path, ending it for everybody else who is still being rung.
+  const direct = await q<{ id: string }>(
     `update vx_calls
         set status = 'declined', ended_at = $3, ended_by = $2
-      where id = $1 and callee_id = $2 and status = 'ringing'
+      where id = $1 and callee_id = $2 and status = 'ringing' and is_group = false
       returning id`,
     [callId, userId, now]
   );
-  if (!rows.length) throw await callRefusal(callId, userId, 'decline');
+
+  // Runs whatever the statement above did. On a group call this is the actual mechanism — only
+  // the refuser is marked, so the call keeps ringing for everybody else. On a one-to-one call it
+  // keeps the record honest: the callee has a participant row too, and leaving it saying
+  // 'invited' would draw them as still being rung on a call they refused.
+  const rows = await q<{ user_id: string }>(
+    `update vx_call_participants
+        set state = 'declined', left_at = $3
+      where call_id = $1 and user_id = $2 and state = 'invited'
+      returning user_id`,
+    [callId, userId, now]
+  );
+
+  // Neither statement matched: not this person's call, or not one they were being rung on.
+  if (!direct.length && !rows.length) throw await callRefusal(callId, userId, 'decline');
+
+  // Nobody left being rung means nobody left to wait for.
+  await endIfEmpty(callId, now);
+
   const call = await callFor(callId, userId);
   if (!call) throw new Error('Call not found');
   return call;
@@ -2430,20 +2774,30 @@ export async function declineCall(callId: string, userId: string): Promise<Call>
 export async function endCall(callId: string, userId: string): Promise<Call> {
   const now = Date.now();
   const rows = await q<{ id: string }>(
-    `update vx_calls
+    `update vx_calls c
         set status = case
-              when status = 'ringing' and caller_id = $2 then 'missed'
+              when c.status = 'ringing' and c.caller_id = $2 then 'missed'
               else 'ended'
             end,
             ended_at = $3,
             ended_by = $2
-      where id = $1
-        and (caller_id = $2 or callee_id = $2)
-        and status in ('ringing', 'accepted')
+      where c.id = $1
+        and ${isParticipant(2)}
+        and c.status in ('ringing', 'accepted')
       returning id`,
     [callId, userId, now]
   );
   if (!rows.length) throw await callRefusal(callId, userId, 'end');
+
+  // Everyone still on it is marked as gone, so a roster drawn from these rows agrees with the
+  // call being over rather than showing people who were never told it ended.
+  await q(
+    `update vx_call_participants
+        set state = 'left', left_at = coalesce(left_at, $2)
+      where call_id = $1 and state in ('invited', 'joined')`,
+    [callId, now]
+  );
+
   const call = await callFor(callId, userId);
   if (!call) throw new Error('Call not found');
   return call;
@@ -2461,7 +2815,8 @@ export async function addCallSignal(
   callId: string,
   fromId: string,
   kind: CallSignal['kind'],
-  payload: string
+  payload: string,
+  toId: string | null = null
 ): Promise<void> {
   if (kind !== 'offer' && kind !== 'answer' && kind !== 'candidate') {
     throw new Error('That is not a call signal');
@@ -2470,15 +2825,27 @@ export async function addCallSignal(
   if (!body) throw new Error('An empty call signal cannot be sent');
   if (body.length > MAX_SIGNAL_PAYLOAD) throw new Error('That call signal is too large');
 
+  // Null means "whoever else is on this call", which is what one-to-one signalling has always
+  // meant and what those older rows still mean.
+  const recipient = toId ? String(toId) : null;
+  if (recipient && recipient === fromId) {
+    throw new Error('A call signal cannot be addressed to its own sender');
+  }
+
   const rows = await q<{ seq: number }>(
-    `insert into vx_call_signals (call_id, from_id, kind, payload, created_at)
-     select $1, $2, $3, $4, $5
+    `insert into vx_call_signals (call_id, from_id, to_id, kind, payload, created_at)
+     select $1, $2, $3, $4, $5, $6
        from vx_calls c
       where c.id = $1
-        and (c.caller_id = $2 or c.callee_id = $2)
+        and ${isParticipant(2)}
         and c.status in ('ringing', 'accepted')
+        -- The recipient has to be on the call too. Without this, anybody on a call could post an
+        -- offer addressed to a stranger's user id and have it sit in the table.
+        and ($3::text is null
+             or exists (select 1 from vx_call_participants p
+                         where p.call_id = c.id and p.user_id = $3))
      returning seq`,
-    [callId, fromId, kind, body, Date.now()]
+    [callId, fromId, recipient, kind, body, Date.now()]
   );
   if (!rows.length) throw new Error('Forbidden: that call is not yours');
 }
@@ -2496,13 +2863,27 @@ export async function listCallSignals(
   afterSeq = 0
 ): Promise<CallSignal[]> {
   const after = Number.isFinite(afterSeq) ? Math.max(0, Math.floor(afterSeq)) : 0;
-  const rows = await q<{ seq: number; from_id: string; kind: string; payload: string }>(
-    `select s.seq, s.from_id, s.kind, s.payload
+  const rows = await q<{
+    seq: number;
+    from_id: string;
+    to_id: string | null;
+    kind: string;
+    payload: string;
+  }>(
+    `select s.seq, s.from_id, s.to_id, s.kind, s.payload
        from vx_call_signals s
        join vx_calls c on c.id = s.call_id
       where s.call_id = $1
-        and (c.caller_id = $2 or c.callee_id = $2)
+        and ${isParticipant(2)}
         and s.seq > $3
+        -- Signals addressed to somebody else are not mine to read. Without this, on a call with
+        -- three or more people every participant would see every offer and each would try to
+        -- answer ones meant for somebody else. Null means the call's other participants, which
+        -- is how one-to-one signalling worked before this column existed.
+        --
+        -- A consequence worth knowing: a signal I address to one peer no longer comes back to
+        -- me, where an unaddressed one still does. Nothing needs its own offer echoed.
+        and (s.to_id is null or s.to_id = $2)
       order by s.seq asc
       limit 250`,
     [callId, userId, after]
@@ -2512,6 +2893,7 @@ export async function listCallSignals(
     kind:
       row.kind === 'offer' ? 'offer' : row.kind === 'answer' ? 'answer' : 'candidate',
     fromId: row.from_id,
+    toId: row.to_id,
     payload: row.payload,
   }));
 }
@@ -2712,4 +3094,162 @@ export async function forgetWhatsAppSession(
     [sessionId, userId]
   );
   return rows.length > 0;
+}
+
+/* ── talking to the bot from inside the app ─────────────────────────────────── */
+
+/**
+ * The phone behind a session, but only if this user is the one who paired it.
+ *
+ * Written as one query rather than "fetch then check", so a session id somebody guessed reads
+ * nothing at all instead of being read and then rejected. Null covers both "no such session"
+ * and "not yours", and the caller cannot tell the two apart — the same shape as
+ * getWhatsAppPairing.
+ *
+ * This is the only gate between a signed-in user and the bot: every write below goes through
+ * it, so a bug here would let one account drive another account's bot.
+ */
+async function botSessionPhone(userId: string, sessionId: string): Promise<string | null> {
+  const rows = await q<{ phone: string | null }>(
+    `select s.phone
+       from varnox_sessions s
+      where s.id = $1
+        and s.status is distinct from 'disconnected'
+        and exists (
+          select 1 from varnox_pairing_requests p
+           where p.user_id = $2
+             and 'web_' || p.phone = s.id
+             and p.status = 'connected'
+        )`,
+    [sessionId, userId]
+  );
+  return rows[0] ? rows[0].phone ?? '' : null;
+}
+
+type BotThreadRow = {
+  direction: 'in' | 'out';
+  id: number;
+  body: string | null;
+  kind: string;
+  state: string | null;
+  error: string | null;
+  media_id: number | null;
+  byte_size: number | null;
+  created_at: Date | string;
+};
+
+/**
+ * One picture the bot sent, if this account is allowed to see it.
+ *
+ * Permission is by reference, not by ownership: media is stored once per distinct image and
+ * shared between every thread that received it, so there is no user on the media row to check
+ * against. What is checked instead is that one of this account's own replies points at it —
+ * which also means identical bytes sent to two people reveal nothing to either, since they
+ * already had the same picture.
+ *
+ * Returns null rather than throwing for "not yours" and "does not exist" alike, so the route
+ * can answer both with the same 404 and no one learns which is which.
+ */
+export async function botMediaFor(
+  mediaId: number,
+  userId: string
+): Promise<{ mime: string; bytes: Buffer } | null> {
+  if (!Number.isFinite(mediaId)) return null;
+
+  const rows = await q<{ mime: string; bytes: Buffer }>(
+    `select m.mime, m.bytes
+       from varnox_bot_media m
+      where m.id = $1
+        and exists (
+          select 1 from varnox_bot_outbound o
+           where o.media_id = m.id and o.user_id = $2
+        )`,
+    [mediaId, userId]
+  );
+
+  return rows[0] ?? null;
+}
+
+/**
+ * Queue a message typed in the app for the bot to answer.
+ *
+ * Returns null when the session is not this user's, so the route can answer 404 without the
+ * caller learning whether the session exists at all.
+ *
+ * Nothing is sent here. The row is a request; the bot's bridge helper on the host picks it up
+ * and writes the answer to varnox_bot_outbound. That indirection is why the app never needs a
+ * route to the host, and why the host never needs a route into the app.
+ */
+export async function sendBotMessage(
+  userId: string,
+  sessionId: string,
+  body: string
+): Promise<{ id: number; at: number } | null> {
+  if (!sessionId || !body) return null;
+
+  const phone = await botSessionPhone(userId, sessionId);
+  if (phone === null) return null;
+
+  const rows = await q<{ id: number; created_at: Date | string }>(
+    `insert into varnox_bot_inbound (session_id, user_id, body)
+     values ($1, $2, $3)
+     returning id, created_at`,
+    [sessionId, userId, body]
+  );
+
+  return rows[0] ? { id: rows[0].id, at: toEpochMs(rows[0].created_at) } : null;
+}
+
+/**
+ * The thread for one number: what was typed, and what came back, in one list.
+ *
+ * Scoped by user_id in both halves of the union, so a session id belonging to somebody else
+ * yields an empty thread rather than theirs.
+ *
+ * Bounded to the newest `limit` rows before sorting, not after — taking the newest *combined*
+ * rows is what keeps a long thread's page meaningful. Ordering is by created_at because the two
+ * tables have independent id sequences, and both are written by the same database clock.
+ */
+export async function listBotThread(
+  userId: string,
+  sessionId: string,
+  limit = 100
+): Promise<BotThreadMessage[]> {
+  if (!sessionId) return [];
+
+  const size = Math.min(Math.max(Number(limit) || 100, 1), 500);
+
+  // The media join is a LEFT JOIN rather than a subquery so the byte size comes back with the
+  // row: the screen can then skip fetching a picture it is not going to render, and never has
+  // to ask the media route whether it exists.
+  const rows = await q<BotThreadRow>(
+    `with recent as (
+       select 'in' as direction, i.id, i.body, 'text' as kind,
+              i.status as state, i.error, null::bigint as media_id,
+              null::integer as byte_size, i.created_at
+         from varnox_bot_inbound i
+        where i.session_id = $1 and i.user_id = $2
+       union all
+       select 'out', o.id, o.body, o.kind, null, null, o.media_id, m.byte_size, o.created_at
+         from varnox_bot_outbound o
+         left join varnox_bot_media m on m.id = o.media_id
+        where o.session_id = $1 and o.user_id = $2
+       order by created_at desc, id desc
+       limit $3
+     )
+     select * from recent order by created_at asc, id asc`,
+    [sessionId, userId, size]
+  );
+
+  return rows.map((r) => ({
+    direction: r.direction,
+    id: Number(r.id),
+    body: r.body ?? '',
+    kind: r.kind,
+    state: (r.state as BotThreadMessage['state']) ?? null,
+    error: r.error,
+    mediaId: r.media_id === null ? null : Number(r.media_id),
+    mediaBytes: r.byte_size === null ? null : Number(r.byte_size),
+    at: toEpochMs(r.created_at),
+  }));
 }
