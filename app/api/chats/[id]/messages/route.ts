@@ -8,8 +8,10 @@ import {
   getReactions,
   getSettings,
   getTyping,
+  isAccountDeleted,
 } from '@/lib/db';
 import { newId } from '@/lib/ids';
+import { peerIdOf } from '@/lib/present';
 import { normalisePhone } from '@/lib/phone';
 import { deliverMessage } from '@/lib/service';
 import type { Message, MessagePayload, MessageType } from '@/lib/types';
@@ -96,6 +98,17 @@ export async function POST(req: Request, ctx: Ctx) {
     const conv = await getConv(id);
     if (!conv) return bad('Chat not found', 404);
     if (!conv.members.includes(me.id)) return bad('You are not in this chat', 403);
+
+    // A one-to-one thread with an account that has since been deleted stays readable, because
+    // the history belongs to both parties — but nothing new goes into it. Refusing only at
+    // chat-creation time would leave the second, equally ordinary way of messaging somebody
+    // open: opening the thread that already exists and typing. The composer is still enabled
+    // there, so the refusal has to be here, and it has to name which of the two situations this
+    // is — the chat exists, the person does not.
+    const peerId = peerIdOf(conv, me.id);
+    if (peerId && (await isAccountDeleted(peerId))) {
+      return bad('This account is deleted', 410);
+    }
 
     const body = await readJsonBody<SendBody>(req);
     const type: MessageType = ['image', 'audio', 'file', 'location', 'contact'].includes(String(body.type))

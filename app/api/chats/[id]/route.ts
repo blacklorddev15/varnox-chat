@@ -1,6 +1,6 @@
 import { requireUser } from '@/lib/auth';
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
-import { chatSummaries, getConv, getConvReads, getUser } from '@/lib/db';
+import { chatSummaries, getConv, getConvReads, getUser, liveUserIds } from '@/lib/db';
 import { buildChatRow, emptySummary } from '@/lib/present';
 import {
   describeMembers,
@@ -80,11 +80,16 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const addedIds: string[] = [];
 
     if (Array.isArray(body.addMembers) && body.addMembers.length) {
-      for (const raw of body.addMembers.slice(0, 100)) {
-        const uid = String(raw);
-        if (uid === me.id) continue;
+      const wanted = body.addMembers.slice(0, 100).map(String).filter((uid) => uid !== me.id);
+      // A deleted account still resolves through getUser, so the existence check below cannot
+      // keep one out — it would be added to the member list and then hidden from it again by
+      // presentMember, leaving the group with a member nobody can see. Asked once for the whole
+      // batch rather than once per id, because this loop can carry a hundred of them.
+      const live = await liveUserIds(wanted);
+      for (const uid of wanted) {
         const user = await getUser(uid);
         if (!user) continue;
+        if (!live.has(uid)) continue;
         if (!members.has(uid)) addedIds.push(uid);
         members.add(uid);
       }
