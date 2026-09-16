@@ -25,8 +25,15 @@ type Body = { kind?: string; targetId?: string; reason?: string; note?: string }
  * A reporter could otherwise file a report that appears to accuse somebody else entirely, and
  * the wrong account is exactly what gets suspended.
  *
- * Membership is checked for groups and messages, so this cannot be used to confirm that a
- * conversation exists, or to report into somebody else's group.
+ * Membership is checked for groups and messages, so a report cannot be filed into somebody
+ * else's conversation.
+ *
+ * It is not, however, blind to whether an id exists: a group or message that is not found answers
+ * 404 while one that is found but not joined answers 403, so a signed-in account can confirm an
+ * id it already holds. That is a narrow oracle and it is left as it is — ids are a prefix, a
+ * base36 timestamp and seven random characters, so there is nothing to walk, and collapsing the
+ * two answers would take away the only distinction that tells a reporter whether they mistyped
+ * something or are simply not a member. Worth writing down rather than claiming otherwise.
  */
 export async function POST(req: Request) {
   return handle(async () => {

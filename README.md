@@ -262,6 +262,22 @@ password, the same treatment a deleted account gets. `/api/auth/register` refuse
 somebody creating an account is asserting an identity and a vague error would only send them round
 the same form again.
 
+Two details make the quiet answer actually quiet, and both are easy to get wrong:
+
+- **The block is decided inside `startOtp`, after the rate slots are spent — not in the route.**
+  Returning early from the route skips the throttles, and the two answers then differ in the one
+  way that is trivial to observe: a real number answers 429 on a second request inside the
+  cooldown, while a blocked number would answer 200 every time. That difference is itself a way
+  to ask whether a number is blocked.
+- **`verifyOtp` checks the list too.** A code is good for ten minutes, so blocking a number a
+  moment after a code was sent would otherwise leave that code exchangeable for a session — and,
+  for a number with no account yet, for a brand new one. It answers exactly as an absent code
+  does, so nothing is revealed either way.
+
+**A block does not end existing sessions.** It stops a number obtaining a *new* one. Ending the
+sessions an account already holds is what suspension is for, and the two are meant to be used
+together: suspend the account to stop it being used, block the number to stop it coming back.
+
 ### Knowing who did what
 
 Every owner action writes a row to `vx_admin_audit` — suspend, reinstate, delete, block, unblock,

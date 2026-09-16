@@ -1,7 +1,6 @@
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
-import { isPhoneBlocked } from '@/lib/db';
-import { formatPhone, normalisePhone } from '@/lib/phone';
-import { OTP_RESEND_MS, OTP_TTL_MS, startOtp } from '@/lib/otp';
+import { normalisePhone } from '@/lib/phone';
+import { startOtp } from '@/lib/otp';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,25 +36,15 @@ export async function POST(req: Request) {
     if (!phone) return bad('Enter a valid phone number, including the country code');
 
     /**
-     * A blocked number gets no code and the same reply as anybody else.
+     * No blocklist check here, and that is deliberate.
      *
-     * The reply matters more than the block here. Answering differently would turn this endpoint
-     * into a way to ask whether a particular number is blocked, one number at a time — the same
-     * reason the response below never says whether an account already exists. So nothing is sent,
-     * nothing is recorded, and the shape of the answer is the one a real send produces.
-     *
-     * The numbers are the declared TTL and cooldown rather than values read back from a code row,
-     * because there is no code row. They are what a real send would have said.
+     * A blocked number gets no code and the same reply as anybody else — but deciding that at
+     * this level means returning before the throttles, and then the two answers differ in the
+     * one way that is easy to see: a real number answers 429 on a second request inside the
+     * cooldown, while a blocked number would answer 200 every time. That is a way to ask whether
+     * a number is blocked. The decision therefore lives in `startOtp`, after the rate slots have
+     * been spent, so the two paths are indistinguishable by construction.
      */
-    if (await isPhoneBlocked(phone)) {
-      return ok({
-        sent: true,
-        to: formatPhone(phone),
-        expiresInSec: Math.round(OTP_TTL_MS / 1000),
-        resendInSec: Math.round(OTP_RESEND_MS / 1000),
-      });
-    }
-
     const result = await startOtp(phone, clientIp(req));
     if (!result.ok) return bad(result.error, result.status);
 

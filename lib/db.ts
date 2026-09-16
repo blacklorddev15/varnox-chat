@@ -3737,13 +3737,14 @@ export async function createReport(input: {
   reason: string;
   note: string | null;
 }): Promise<{ created: boolean; id: number | null; open: number; tooMany: boolean }> {
-  const already = await q<{ n: number }>(
-    `select count(*)::int as n from vx_reports where reporter_id = $1 and status = 'open'`,
-    [input.reporterId]
-  );
-  const open = Number(already[0]?.n ?? 0);
-  if (open >= MAX_OPEN_REPORTS) return { created: false, id: null, open, tooMany: true };
-
+  /**
+   * Both conditions live in the insert: not already open for this target, and under the cap.
+   *
+   * The cap was briefly checked before the insert, which let a burst through — several requests
+   * could each read the same count, all decide they were under the limit, and all insert. The
+   * duplicate half was always atomic; this half now is too, and it has to be, because the cap is
+   * the only thing standing between the queue and an account that files reports in a loop.
+   */
   const rows = await q<{ id: number }>(
     `insert into vx_reports
        (reporter_id, kind, target_id, target_name, reason, note, status, at)
@@ -3752,6 +3753,10 @@ export async function createReport(input: {
               select 1 from vx_reports
                where reporter_id = $1 and target_id = $3 and status = 'open'
             )
+        and (
+              select count(*) from vx_reports
+               where reporter_id = $1 and status = 'open'
+            ) < $8
      returning id`,
     [
       input.reporterId,
@@ -3761,15 +3766,22 @@ export async function createReport(input: {
       input.reason,
       input.note,
       Date.now(),
+      MAX_OPEN_REPORTS,
     ]
   );
 
-  return {
-    created: rows.length > 0,
-    id: rows[0] ? Number(rows[0].id) : null,
-    open,
-    tooMany: false,
-  };
+  if (rows.length > 0) {
+    return { created: true, id: Number(rows[0].id), open: 0, tooMany: false };
+  }
+
+  // Nothing was inserted, and the reason is asked for afterwards rather than decided beforehand:
+  // a duplicate and a full queue both insert no rows, and only a count taken now says which.
+  const after = await q<{ n: number }>(
+    `select count(*)::int as n from vx_reports where reporter_id = $1 and status = 'open'`,
+    [input.reporterId]
+  );
+  const open = Number(after[0]?.n ?? 0);
+  return { created: false, id: null, open, tooMany: open >= MAX_OPEN_REPORTS };
 }
 
 /** The queue: open reports first, newest first within each. */
