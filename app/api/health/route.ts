@@ -24,6 +24,10 @@ const REQUIRED_TABLES = [
   'vx_msg_views',
   'vx_calls',
   'vx_call_signals',
+  // Where call membership lives. Without it a group call cannot be joined by anybody, and the
+  // one-to-one screens still work — so a missing table here would look like "group calls are
+  // just broken" rather than like a schema problem.
+  'vx_call_participants',
   // The pairing bridge's tables are not in the vx_ namespace, because an external bot
   // polls them by name and the names come from its source rather than from here.
   'varnox_pairing_requests',

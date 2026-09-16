@@ -352,14 +352,43 @@ export type ChannelFollower = {
 export type Call = {
   id: string;
   callerId: string;
+  /**
+   * The person being called on a one-to-one call.
+   *
+   * On a group call this holds the **first person invited** — a real participant, not a
+   * placeholder. It stays populated because the one-to-one call screens are built around it and
+   * should not have to care that group calls exist. Use `isGroup` to tell the two apart, and
+   * `participants` for everybody on the call.
+   */
   calleeId: string;
+  /**
+   * More than two people were invited. True even when only one person was, because a call
+   * started from a group is a different thing from a call started against one contact — it has
+   * a roster, and one person leaving does not end it.
+   */
+  isGroup: boolean;
   kind: 'audio' | 'video';
   status: 'ringing' | 'accepted' | 'declined' | 'ended' | 'missed';
   createdAt: number;
   answeredAt: number | null;
   endedAt: number | null;
   endedBy: string | null;
+  /**
+   * Who this call is "about" for the one-to-one screens: the other party. On a group call there
+   * is no such person, so this is the caller for anybody who did not start it, and the first
+   * other participant for whoever did. It is a compatibility field — a group call should draw
+   * `participants`, not this.
+   */
   peer: PublicUser;
+  /**
+   * Everyone on the call: the caller first, then everybody invited. Always populated, including
+   * for calls made before group calls existed, whose list is synthesised from callerId and
+   * calleeId.
+   *
+   * One-to-one calls have exactly two entries, so `participants.length > 2` is what tells a
+   * screen it is looking at a group call.
+   */
+  participants: CallParticipant[];
   direction: 'incoming' | 'outgoing';
   /** The call was never answered. */
   missed: boolean;
@@ -374,10 +403,36 @@ export type Call = {
  * `seq` is the cursor a poll asks from, so a reader only ever sees what arrived after the last
  * signal it handled.
  */
+/** Where somebody is in a call. */
+export type CallParticipantState = 'invited' | 'joined' | 'left' | 'declined';
+
+/**
+ * One person on a call, and how far they got with it.
+ *
+ * The state is carried because a group call needs it and a one-to-one call never did: on a
+ * one-to-one call, "who is on it" and "who was asked" are the same two people. With three or
+ * more, a screen has to tell apart the people who are actually there from the ones still being
+ * rung and the ones who have already gone.
+ *
+ * The list is deliberately not filtered down to the live ones. History needs everybody — a
+ * finished call has nobody 'joined' at all, so filtering here would erase it from the list.
+ */
+export type CallParticipant = {
+  user: PublicUser;
+  state: CallParticipantState;
+};
+
 export type CallSignal = {
   seq: number;
   kind: 'offer' | 'answer' | 'candidate';
   fromId: string;
+  /**
+   * Who the signal is for. An offer and an ICE candidate belong to one specific peer, so on a
+   * call with three or more people a signal has to say which. Null means "whoever else is on
+   * the call", which is how one-to-one signalling worked before this field existed and how
+   * those older rows still read.
+   */
+  toId: string | null;
   payload: string;
 };
 

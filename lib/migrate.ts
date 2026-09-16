@@ -40,7 +40,7 @@ type Step = {
   sql: string;
 };
 
-const STEPS: Step[] = [
+export const STEPS: Step[] = [
   {
     kind: 'column',
     label: 'vx_users.email',
@@ -358,6 +358,39 @@ const STEPS: Step[] = [
     kind: 'column',
     label: 'varnox_bot_outbound.media_id',
     sql: `alter table varnox_bot_outbound add column if not exists media_id bigint`,
+  },
+  {
+    kind: 'table',
+    label: 'vx_call_participants',
+    sql: `create table if not exists vx_call_participants (
+            call_id    text   not null,
+            user_id    text   not null,
+            state      text   not null default 'invited',
+            invited_at bigint not null,
+            joined_at  bigint,
+            left_at    bigint,
+            primary key (call_id, user_id)
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_call_participants_user',
+    sql: `create index if not exists vx_call_participants_user
+            on vx_call_participants (user_id, call_id)`,
+  },
+  {
+    // A new column rather than relaxing callee_id to nullable: this label is findable in
+    // information_schema, so it is applied once and skipped afterwards. A step that only altered
+    // an existing column could never be described as "present", and would re-run — and re-lock
+    // the table — on every cold start.
+    kind: 'column',
+    label: 'vx_calls.is_group',
+    sql: `alter table vx_calls add column if not exists is_group boolean not null default false`,
+  },
+  {
+    kind: 'column',
+    label: 'vx_call_signals.to_id',
+    sql: `alter table vx_call_signals add column if not exists to_id text`,
   },
 ];
 

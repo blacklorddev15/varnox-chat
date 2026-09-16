@@ -475,6 +475,76 @@ create table if not exists vx_call_signals (
 -- Reading is always "the signals for this call, after this cursor".
 create index if not exists vx_call_signals_call on vx_call_signals (call_id, seq);
 
+/* ── group calls: who is on a call ────────────────────────────────────── */
+
+-- Who is on a call.
+--
+-- vx_calls keeps caller_id and callee_id, and for a one-to-one call those two are still the
+-- whole story. A group call cannot be written that way: there is no second party, only a set.
+-- So membership lives here, and every authorisation check in lib/db.ts asks this table instead
+-- of comparing two columns.
+--
+-- `state` is per participant, which is what makes a group call legible: 'invited' is somebody
+-- still being rung, 'joined' has picked up, 'left' hung up without ending it for anybody else,
+-- 'declined' refused. That distinction is why the two cases cannot share one rule — a
+-- one-to-one call is over when either side hangs up, whereas a group call has to survive one
+-- person leaving.
+--
+-- Keep the semicolon character out of these notes. This file is split on it before the
+-- statements reach Postgres, and one typed inside a comment cuts a statement in half.
+-- Timestamps are bigint epoch milliseconds, not timestamptz, to match the rest of the vx_
+-- tables (vx_calls, vx_call_signals). Mixing the two conventions inside one call is how you get
+-- a coalesce that silently means a different thing in each branch.
+create table if not exists vx_call_participants (
+  call_id    text   not null,
+  user_id    text   not null,
+  state      text   not null default 'invited',
+  invited_at bigint not null,
+  joined_at  bigint,
+  left_at    bigint,
+  primary key (call_id, user_id)
+);
+
+-- "Is there a live call for me" is asked about once a second while a call is up, so it gets its
+-- own index rather than scanning every participant row ever written.
+create index if not exists vx_call_participants_user
+  on vx_call_participants (user_id, call_id);
+
+-- Whether this is a group call.
+--
+-- The obvious alternative was to let callee_id go null and read a null as "group". That was
+-- abandoned for a reason worth recording: lib/migrate.ts decides what to apply by checking
+-- whether `kind:label` is already *present*, and there is no way to express "this column is
+-- nullable" as a presence check. A step labelled vx_calls.callee_id can never be found by an
+-- information_schema lookup, so it would re-run on every cold start — taking an ACCESS EXCLUSIVE
+-- lock on the live calls table each time, for a change that was already done.
+--
+-- A new column IS a presence check, so this works with the mechanism instead of against it, and
+-- it says what it means: being a group call is a fact about the call rather than a side effect
+-- of a nullable column. It also keeps the two-person group call — a caller and a single invitee,
+-- which startGroupCall allows — honest, where inferring group-ness from a participant count
+-- would quietly call it a one-to-one.
+--
+-- callee_id therefore stays not null. On a group call it holds the first person invited: a
+-- truthful value, since they are one of the people being called, and it is what the one-to-one
+-- "who is this about" line falls back to. is_group is what tells the two apart.
+alter table vx_calls
+  add column if not exists is_group boolean not null default false;
+
+-- Signals become addressed. An offer or an ICE candidate belongs to one specific peer, and with
+-- three or more people an unaddressed signal is read by everybody — each of whom would try to
+-- answer an offer meant for somebody else. Null is kept for rows written before this existed,
+-- where it means "for whoever else is on this call" — which is exactly how one-to-one
+-- signalling already worked, so those rows stay readable.
+alter table vx_call_signals
+  add column if not exists to_id text;
+
+-- Calls made before this table existed have no participant rows, and there is deliberately no
+-- backfill for them. Every membership read in lib/db.ts is instead written as
+-- "a participant row, or one of the two old columns" — which keeps those calls visible to both
+-- parties without moving any data, and cannot half-succeed the way a backfill can. toCall
+-- synthesises their participant list from caller_id and callee_id for the same reason.
+
 /* ── whatsapp pairing (an external bot links the number) ──────────────── */
 
 -- One row per "Link WhatsApp" request. An external bot process -- not this app -- polls this
