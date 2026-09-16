@@ -2608,3 +2608,256 @@ html[data-theme='light'] .ch-post {
   font-size: 13px;
   text-align: center;
 }
+
+/* ── calls (voice and video) ──────────────────────────────────────────── */
+
+/* The Calls screen borrows the updates shell — .updates, .updates-head, .updates-body — and the
+   chat list's own rows, because it is the same thing: a head, a scrolling list, and rows of
+   avatar plus two lines. Only what a call adds is named here. */
+
+/* The avatar with a small direction badge on it: outgoing, incoming or missed. The badge is the
+   only thing that tells one row from the next at a glance, so missed gets the loud colour. */
+.call-face {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.call-dir {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  border: 2px solid var(--panel);
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+}
+html[data-theme='dark'] .call-dir {
+  color: #6ee0bc;
+}
+.call-dir.missed {
+  background: rgba(241, 92, 109, 0.16);
+  color: var(--danger);
+}
+
+/* A call nobody answered reads as missed all the way across the row, not just on the badge. */
+.chat-item-time.missed,
+.chat-item-preview.missed {
+  color: var(--danger);
+}
+
+/* Voice or video, before anybody is chosen. */
+.call-kind {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.call-kind .filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* A call is a screen of its own: above every sheet, and above the status and channel viewers,
+   because a ringing phone is not something to be read behind. */
+.call-full {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  background: #0b141a;
+  color: #f2f5f7;
+  animation: fade 0.14s ease-out;
+}
+
+/* Who is calling, and the two answers to it. */
+.call-person {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 20px;
+}
+.call-person b {
+  font-weight: 500;
+  font-size: 25px;
+  text-align: center;
+}
+.call-sub {
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 14.6px;
+}
+
+.call-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 46px;
+  flex: none;
+  padding: 18px 20px calc(34px + env(safe-area-inset-bottom, 0px));
+}
+.call-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+  font-size: 13px;
+}
+.call-btn > svg {
+  width: 62px;
+  height: 62px;
+  padding: 18px;
+  border-radius: 50%;
+  color: #fff;
+}
+.call-btn.accept > svg {
+  background: #12a87e;
+}
+.call-btn.decline > svg {
+  background: var(--danger);
+}
+.call-btn:disabled {
+  opacity: 0.5;
+}
+
+.call-top {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 20px 0;
+  text-align: center;
+}
+.call-top b {
+  font-weight: 500;
+  font-size: 19px;
+}
+.call-top span {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 13.6px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The video stage. Full-bleed, with the local stream as a small picture-in-picture in the
+   corner; tapping the small one swaps the two. */
+.call-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #000;
+}
+.call-remote {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+/* A voice call has no picture to show: the element stays in the tree — it is what plays the
+   other person — but it is reduced to nothing so the avatar can take the stage. */
+.call-stage.voice {
+  background: #0b141a;
+}
+.call-stage.voice .call-remote {
+  inset: auto;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0.01;
+}
+.call-stage .call-person {
+  position: absolute;
+  inset: 0;
+}
+.call-local {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 2;
+  width: 108px;
+  height: 156px;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: #111b21;
+  box-shadow: var(--shadow-lg);
+  transition: all 0.16s ease-out;
+}
+.call-local video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.call-stage.swapped .call-local {
+  left: 14px;
+  right: 14px;
+  top: 14px;
+  bottom: 14px;
+  width: auto;
+  height: auto;
+}
+.call-stage.swapped .call-remote {
+  inset: auto;
+  right: 14px;
+  bottom: 14px;
+  top: auto;
+  left: auto;
+  width: 108px;
+  height: 156px;
+  z-index: 2;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Mute, speaker, camera, hang up. */
+.call-controls {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 18px;
+  padding: 16px 16px calc(20px + env(safe-area-inset-bottom, 0px));
+  background: #0b141a;
+}
+.call-ctl {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 62px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 11.4px;
+}
+.call-ctl > svg {
+  width: 50px;
+  height: 50px;
+  padding: 14px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.call-ctl.on > svg {
+  background: #fff;
+  color: #111b21;
+}
+.call-ctl.end > svg {
+  background: var(--danger);
+  color: #fff;
+}
+.call-ctl:disabled {
+  opacity: 0.5;
+}

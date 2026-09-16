@@ -442,3 +442,111 @@ export function IconSun({ size = 20, className }: P) {
     </svg>
   );
 }
+/* ── calls ────────────────────────────────────────────────────────────── */
+
+/* The handset every phone UI is built from. Reused at several sizes: the Calls tab, the kind
+   icon on a history row, and the accept button. */
+export function IconPhone({ size = 22, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
+      <path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.24 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.4 11.4 0 0 0 .57 3.6 1 1 0 0 1-.25 1z" />
+    </svg>
+  );
+}
+
+export function IconNewCall({ size = 22, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
+      <path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.24 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.4 11.4 0 0 0 .57 3.6 1 1 0 0 1-.25 1z" />
+      <path d="M17 3.4v5M14.5 5.9h5" />
+    </svg>
+  );
+}
+
+/** The same handset, turned over: this is the one you press to hang up. */
+export function IconCallEnd({ size = 22, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
+      <g transform="rotate(135 12 12)">
+        <path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.24 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.4 11.4 0 0 0 .57 3.6 1 1 0 0 1-.25 1z" />
+      </g>
+    </svg>
+  );
+}
+
+/** A handset with an arrow coming in — a call somebody else started. */
+export function IconPhoneIncoming({ size = 22, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
+      <path d="M4.2 6.4a14.4 14.4 0 0 0 6.3 6.3l2-2a1 1 0 0 1 .95-.23 10.9 10.9 0 0 0 3.4.54 1 1 0 0 1 .95 1v3.3a1 1 0 0 1-.95 1A16.2 16.2 0 0 1 1.4 4.5a1 1 0 0 1 .95-.95h3.3a1 1 0 0 1 .95.95 10.9 10.9 0 0 0 .54 3.4 1 1 0 0 1-.23.95z" />
+      <path d="M15 3.5v5h5M20 3.5 15.4 8" />
+    </svg>
+  );
+}
+
+/** A handset with an arrow leaving — a call this user started. */
+export function IconPhoneOutgoing({ size = 22, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
+      <path d="M4.2 6.4a14.4 14.4 0 0 0 6.3 6.3l2-2a1 1 0 0 1 .95-.23 10.9 10.9 0 0 0 3.4.54 1 1 0 0 1 .95 1v3.3a1 1 0 0 1-.95 1A16.2 16.2 0 0 1 1.4 4.5a1 1 0 0 1 .95-.95h3.3a1 1 0 0 1 .95.95 10.9 10.9 0 0 0 .54 3.4 1 1 0 0 1-.23.95z" />
+      <path d="M15 8.5v-5h5M20 3.5 15.4 8.1" />
+    </svg>
+  );
+}
+
+/** A handset with a cross — a call nobody answered. Coloured by the row it sits in. */
+export function IconPhoneMissed({ size = 22, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
+      <path d="M4.2 6.4a14.4 14.4 0 0 0 6.3 6.3l2-2a1 1 0 0 1 .95-.23 10.9 10.9 0 0 0 3.4.54 1 1 0 0 1 .95 1v3.3a1 1 0 0 1-.95 1A16.2 16.2 0 0 1 1.4 4.5a1 1 0 0 1 .95-.95h3.3a1 1 0 0 1 .95.95 10.9 10.9 0 0 0 .54 3.4 1 1 0 0 1-.23.95z" />
+      <path d="m15.5 3.5 5 5M20.5 3.5l-5 5" />
+    </svg>
+  );
+}
+
+export function IconVideoCall({ size = 22, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
+      <rect x="2.5" y="6" width="13" height="12" rx="2.4" />
+      <path d="m15.5 10.5 6-3.5v10l-6-3.5" />
+    </svg>
+  );
+}
+
+export function IconVideoOff({ size = 22, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
+      <path d="M15.5 10.5l6-3.5v10l-2.4-1.4" />
+      <path d="M13.4 6H4.9A2.4 2.4 0 0 0 2.5 8.4v7.2A2.4 2.4 0 0 0 4.9 18h10.6a2.4 2.4 0 0 0 2.2-1.4" />
+      <path d="M3 3l18 18" />
+    </svg>
+  );
+}
+
+export function IconMicOff({ size = 22, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
+      <path d="M9 9.5V6a3 3 0 0 1 6 0v6a3 3 0 0 1-.5 1.7" />
+      <path d="M5.5 11.5a6.5 6.5 0 0 0 9.4 5.8M18.5 11.5a6.5 6.5 0 0 1-.4 2.2" />
+      <path d="M12 18v3M8.5 21h7M3 3l18 18" />
+    </svg>
+  );
+}
+
+export function IconSpeaker({ size = 22, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
+      <path d="M4 9.5h3.2L12 5.6v12.8L7.2 14.5H4z" />
+      <path d="M15.6 9a4.2 4.2 0 0 1 0 6M18.3 6.4a7.8 7.8 0 0 1 0 11.2" />
+    </svg>
+  );
+}
+
+export function IconSpeakerOff({ size = 22, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
+      <path d="M4 9.5h3.2L12 5.6v12.8L7.2 14.5H4z" />
+      <path d="m16 9.5 5 5M21 9.5l-5 5" />
+    </svg>
+  );
+}

@@ -9,7 +9,7 @@ import { Avatar } from './avatar';
 import { MediaGallery } from './overlays';
 import { IconCheck, IconClock, IconClose, IconLink, IconSearch } from './icons';
 
-function Sheet({
+export function Sheet({
   title,
   children,
   onClose,
@@ -41,7 +41,11 @@ function label(user: { phone?: string | null; username: string }): string {
   return formatPhone(user.phone ?? null) || `@${user.username}`;
 }
 
-function useUserSearch(query: string) {
+/**
+ * The directory search the new-chat and new-group panels share. Exported so the new-call panel
+ * can show exactly the same list — a call picks a person from the same place a chat does.
+ */
+export function useUserSearch(query: string) {
   const [results, setResults] = useState<PublicUser[]>([]);
   const [searching, setSearching] = useState(false);
   useEffect(() => {

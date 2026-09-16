@@ -22,6 +22,8 @@ const REQUIRED_TABLES = [
   'vx_otp',
   'vx_otp_rate',
   'vx_msg_views',
+  'vx_calls',
+  'vx_call_signals',
 ];
 const REQUIRED_COLUMNS: { table: string; column: string }[] = [
   { table: 'vx_users', column: 'email' },

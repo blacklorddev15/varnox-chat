@@ -4,12 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, post, uploadMedia } from '@/lib/client';
 import type {
+  Call,
   ChatRow,
   Message,
   PublicUser,
   StarredItem,
   UserSettings,
 } from '@/lib/types';
+import { CallScreen, IncomingCall } from './calls';
 import { Sidebar } from './sidebar';
 import { ChatPane } from './chat-pane';
 import { SettingsScreen } from './settings-screen';
@@ -110,7 +112,10 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
   const [filter, setFilter] = useState<'all' | 'unread' | 'groups'>('all');
   const [forwardIds, setForwardIds] = useState<string[]>([]);
   /** Which bottom tab the phone layout is on. Wide screens ignore it and show chats. */
-  const [tab, setTab] = useState<'chats' | 'updates' | 'channels'>('chats');
+  const [tab, setTab] = useState<'chats' | 'updates' | 'channels' | 'calls'>('chats');
+  /** The live call, if there is one: it drives the incoming surface and the in-call screen. */
+  const [call, setCall] = useState<Call | null>(null);
+  const [callStarting, setCallStarting] = useState(false);
 
   const lastAtRef = useRef(0);
   const selectedRef = useRef<string | null>(null);
@@ -338,6 +343,121 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
   useEffect(() => {
     loadChats();
   }, [loadChats]);
+
+  /* ---------------------------------------------------------------- calls */
+
+  /* One poll answers "is there a call for me", and the cadence changes with the answer: about a
+     second while something is ringing or up, so accepting and the ICE exchange feel immediate,
+     and the idle 8s the chat list already runs at the rest of the time. Nothing else is fetched
+     for the call, so an idle poll costs one cheap query. */
+  const callRef = useRef<Call | null>(null);
+  const callPollBusy = useRef(false);
+
+  const pollActiveCall = useCallback(async () => {
+    if (callPollBusy.current) return;
+    callPollBusy.current = true;
+    try {
+      const res = await api<{ call: Call | null }>('/api/calls/active');
+      const before = callRef.current;
+      callRef.current = res.call;
+      setCall(res.call);
+      // An outgoing call that is simply gone was not answered — declined, or the 45 second
+      // window ran out. Either way this screen has to stop ringing, and saying so once beats it
+      // disappearing without explanation.
+      if (before && !res.call && before.status === 'ringing' && before.callerId === me.id) {
+        flash('Call ended');
+      }
+    } catch {
+      /* a poll that fails just tries again on the next tick */
+    } finally {
+      callPollBusy.current = false;
+    }
+  }, [flash, me.id]);
+
+  const inCall = call !== null;
+
+  useEffect(() => {
+    pollActiveCall();
+    const id = window.setInterval(
+      () => {
+        if (document.visibilityState === 'visible') pollActiveCall();
+      },
+      inCall ? 1000 : 8000
+    );
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') pollActiveCall();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [inCall, pollActiveCall]);
+
+  const startCall = useCallback(
+    async (userId: string, kind: 'audio' | 'video') => {
+      if (callStarting) return;
+      setCallStarting(true);
+      try {
+        const res = await post<{ call: Call }>('/api/calls', { calleeId: userId, kind });
+        callRef.current = res.call;
+        setCall(res.call);
+      } catch (err) {
+        flash(err instanceof Error ? err.message : 'Could not start the call');
+      } finally {
+        setCallStarting(false);
+      }
+    },
+    [callStarting, flash]
+  );
+
+  const acceptIncoming = useCallback(async () => {
+    const current = callRef.current;
+    if (!current) return;
+    try {
+      const res = await post<{ call: Call }>(`/api/calls/${current.id}/accept`);
+      callRef.current = res.call;
+      setCall(res.call);
+    } catch (err) {
+      flash(err instanceof Error ? err.message : 'Could not answer the call');
+      callRef.current = null;
+      setCall(null);
+    }
+  }, [flash]);
+
+  const declineIncoming = useCallback(async () => {
+    const current = callRef.current;
+    // Drop it first: the ringtone belongs to the incoming surface being mounted, so it stops on
+    // this line rather than whenever the request comes back.
+    callRef.current = null;
+    setCall(null);
+    if (!current) return;
+    try {
+      await post(`/api/calls/${current.id}/decline`);
+    } catch {
+      /* the call is over either way */
+    }
+  }, []);
+
+  /** The call screen finished tearing itself down — it has already told the server. */
+  const callEnded = useCallback(() => {
+    callRef.current = null;
+    setCall(null);
+  }, []);
+
+  /* Who the call picker offers first: the people this account already talks to one to one. */
+  const callRecents = useMemo(() => {
+    const seen = new Set<string>();
+    const out: PublicUser[] = [];
+    for (const chat of chats) {
+      if (chat.type !== 'direct' || !chat.peer) continue;
+      if (seen.has(chat.peer.id)) continue;
+      seen.add(chat.peer.id);
+      out.push(chat.peer);
+      if (out.length >= 8) break;
+    }
+    return out;
+  }, [chats]);
 
   /* One poll at a time. On a cold serverless database a request can take longer than the
      interval, and without this the ticks stack up into a queue of overlapping queries that
@@ -766,8 +886,11 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
         selectedId={selectedId}
         filter={filter}
         tab={tab}
+        recents={callRecents}
+        callStarting={callStarting}
         onTab={setTab}
         onToast={flash}
+        onCall={startCall}
         onFilter={setFilter}
         onSelectChat={openChat}
         onNewChat={() => setPanel('new-chat')}
@@ -893,6 +1016,15 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
 
       {panel === 'forward' ? (
         <ForwardPanel chats={chats} onClose={() => setPanel(null)} onForward={doForward} />
+      ) : null}
+
+      {/* A call is never a panel: it takes the whole screen, above every sheet, whichever tab
+          happens to be open underneath. The incoming surface is only for the party being
+          called — the caller is already on the call screen, ringing. */}
+      {call && call.status === 'ringing' && call.calleeId === me.id ? (
+        <IncomingCall call={call} onAccept={acceptIncoming} onDecline={declineIncoming} />
+      ) : call ? (
+        <CallScreen me={me} call={call} onEnded={callEnded} onToast={flash} />
       ) : null}
 
       {toast ? <div className="toast">{toast}</div> : null}

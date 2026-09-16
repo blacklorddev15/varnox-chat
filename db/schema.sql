@@ -423,3 +423,54 @@ create table if not exists vx_channel_posts (
 
 -- Every read of a channel is "its latest posts", so the index carries the ordering too.
 create index if not exists vx_channel_posts_channel on vx_channel_posts (channel_id, created_at desc);
+
+/* ── calls (voice and video) ──────────────────────────────────────────── */
+
+-- One row per 1:1 call. There is no WebSocket anywhere in this app, so a call is not a live
+-- connection but a row that both sides poll: the caller inserts it as 'ringing', the other
+-- side turns it into 'accepted' or 'declined', and either side ends it. `kind` is 'audio' or
+-- 'video'. `status` is 'ringing', 'accepted', 'declined', 'ended' or 'missed'.
+--
+-- Nothing sweeps a call that is never answered. The 45 second ringing window is a filter
+-- applied when the row is read, exactly the way an expired status is filtered rather than
+-- deleted: a 'ringing' row older than the window reads as missed, which is what stops it
+-- blocking the next call and what the history shows.
+--
+-- `ended_by` records who hung up, so a row can say who ended it without a second table.
+-- `answered_at` stays null until the call is picked up, and the duration is derived from it
+-- and `ended_at` on read rather than stored, so it cannot disagree with them.
+create table if not exists vx_calls (
+  id          text primary key,
+  caller_id   text not null,
+  callee_id   text not null,
+  kind        text not null,
+  status      text not null,
+  created_at  bigint not null,
+  answered_at bigint,
+  ended_at    bigint,
+  ended_by    text
+);
+
+-- The incoming-call poll asks "is there a live call for me", which is a lookup by callee and
+-- status. The caller's own side is looked up by id and ordered by time.
+create index if not exists vx_calls_callee on vx_calls (callee_id, status);
+create index if not exists vx_calls_caller on vx_calls (caller_id, created_at desc);
+
+/* ── call signals (the signalling channel) ────────────────────────────── */
+
+-- WebRTC needs three things to cross between the two browsers: an offer, an answer, and a
+-- stream of ICE candidates. With no WebSocket, each one is a row here and the other side
+-- reads it by cursor: `seq` is monotonic, so a poll asks for everything after the last one
+-- it has seen. `kind` is 'offer', 'answer' or 'candidate', and `payload` is the stringified
+-- SDP or candidate. Rows are worthless once the call is over and are never read again.
+create table if not exists vx_call_signals (
+  seq        bigserial primary key,
+  call_id    text not null,
+  from_id    text not null,
+  kind       text not null,
+  payload    text not null,
+  created_at bigint not null
+);
+
+-- Reading is always "the signals for this call, after this cursor".
+create index if not exists vx_call_signals_call on vx_call_signals (call_id, seq);

@@ -217,6 +217,48 @@ const STEPS: Step[] = [
     sql: `create index if not exists vx_channel_posts_channel
             on vx_channel_posts (channel_id, created_at desc)`,
   },
+  {
+    kind: 'table',
+    label: 'vx_calls',
+    sql: `create table if not exists vx_calls (
+            id          text primary key,
+            caller_id   text not null,
+            callee_id   text not null,
+            kind        text not null,
+            status      text not null,
+            created_at  bigint not null,
+            answered_at bigint,
+            ended_at    bigint,
+            ended_by    text
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_calls_callee',
+    sql: `create index if not exists vx_calls_callee on vx_calls (callee_id, status)`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_calls_caller',
+    sql: `create index if not exists vx_calls_caller on vx_calls (caller_id, created_at desc)`,
+  },
+  {
+    kind: 'table',
+    label: 'vx_call_signals',
+    sql: `create table if not exists vx_call_signals (
+            seq        bigserial primary key,
+            call_id    text not null,
+            from_id    text not null,
+            kind       text not null,
+            payload    text not null,
+            created_at bigint not null
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_call_signals_call',
+    sql: `create index if not exists vx_call_signals_call on vx_call_signals (call_id, seq)`,
+  },
 ];
 
 /** A request waits this long for reconciliation, then carries on without it. */
