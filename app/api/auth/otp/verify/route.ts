@@ -1,6 +1,7 @@
 import { handleFromPhone, passwordlessHash, publicUser, setSessionCookie } from '@/lib/auth';
-import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
+import { bad, clean, clientIp, deviceLabel, handle, ok, readJsonBody, userAgent } from '@/lib/api';
 import {
+  createDevice,
   findUserByPhone,
   getUserByPhone,
   reservePhone,
@@ -98,7 +99,12 @@ export async function POST(req: Request) {
 
     if (!user) return bad('Could not sign you in. Please try again.', 500);
 
-    await setSessionCookie(user.id);
+    const device = await createDevice(user.id, {
+      label: deviceLabel(req),
+      userAgent: userAgent(req),
+      ip: clientIp(req),
+    });
+    await setSessionCookie(user.id, device.id);
     return ok({ user: publicUser(user), created });
   });
 }

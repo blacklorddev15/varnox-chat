@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, post, uploadImage } from '@/lib/client';
-import type { ChatRow, PublicUser } from '@/lib/types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { api, del, post, uploadImage } from '@/lib/client';
+import type { ChatRow, Device, PublicUser } from '@/lib/types';
 import { presence } from '@/lib/format';
 import { formatPhone } from '@/lib/phone';
 import { Avatar } from './avatar';
@@ -382,6 +382,144 @@ export function ProfilePanel({
           placeholder="Hey there! I am using Varnox."
         />
       </div>
+
+      {error ? <p className="error">{error}</p> : null}
+    </Sheet>
+  );
+}
+
+/** What to call a device: its label, else a trimmed user agent, else nothing useful. */
+function deviceName(device: Device): string {
+  const name = device.label || device.userAgent || '';
+  if (!name) return 'Unknown device';
+  return name.length > 56 ? `${name.slice(0, 55)}…` : name;
+}
+
+/**
+ * The devices signed in to this account, and the way to add another one.
+ *
+ * No code is created until the button is pressed: a code is good for two minutes and is the
+ * credential the other device presents, so one should not be sitting on screen (or in the
+ * database) just because this panel was opened.
+ */
+export function LinkedDevicesPanel({ onClose }: { onClose: () => void }) {
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [code, setCode] = useState('');
+  const [seconds, setSeconds] = useState(0);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await api<{ devices: Device[] }>('/api/link/devices');
+      setDevices(res.devices);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load your devices');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // One tick a second while a code is on screen, counting down the seconds the server said
+  // it has left rather than a local deadline.
+  useEffect(() => {
+    if (seconds <= 0) return;
+    const id = window.setInterval(() => setSeconds((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => window.clearInterval(id);
+  }, [seconds]);
+
+  async function linkDevice() {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await post<{ code: string; expiresInSec: number }>('/api/link/code');
+      setCode(res.code);
+      setSeconds(res.expiresInSec);
+    } catch (err) {
+      // A throttled request answers with when to come back, which is the useful part.
+      setError(err instanceof Error ? err.message : 'Could not create a code');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function logOut(device: Device) {
+    setBusy(true);
+    setError('');
+    try {
+      await del(`/api/link/devices/${device.id}`);
+      setDevices((prev) => prev.filter((d) => d.id !== device.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not log that device out');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Sheet title="Linked devices" onClose={onClose}>
+      <p className="hint" style={{ marginBottom: 10 }}>
+        Every device signed in to this account. Logging one out ends its session there.
+      </p>
+
+      {loading ? (
+        <div className="loading">Loading your devices…</div>
+      ) : devices.length === 0 ? (
+        <p className="hint">No devices are signed in yet.</p>
+      ) : (
+        devices.map((device) => (
+          <div key={device.id} className="member-row">
+            <span className="body">
+              <b>
+                {deviceName(device)}
+                {device.current ? (
+                  <span className="tag" style={{ marginLeft: 8 }}>
+                    This device
+                  </span>
+                ) : null}
+              </b>
+              <span>{presence(device.lastSeen)}</span>
+            </span>
+            {device.current ? null : (
+              <button
+                type="button"
+                className="btn danger"
+                disabled={busy}
+                onClick={() => void logOut(device)}
+              >
+                Log out
+              </button>
+            )}
+          </div>
+        ))
+      )}
+
+      <div className="field-row" style={{ marginTop: 16 }}>
+        <button type="button" className="btn" onClick={linkDevice} disabled={busy}>
+          {busy ? 'Getting a code…' : code ? 'Get a new code' : 'Link a device'}
+        </button>
+      </div>
+
+      {code ? (
+        <>
+          <div style={{ textAlign: 'center', margin: '6px 0 10px' }}>
+            <div style={{ fontSize: 34, fontWeight: 600, letterSpacing: 6 }}>{code}</div>
+            <p className="hint">{seconds > 0 ? `Expires in ${seconds}s` : 'That code has expired.'}</p>
+          </div>
+          <p className="hint">
+            Open Varnox on the other device, choose Link a device, and enter this code.
+          </p>
+        </>
+      ) : (
+        <p className="hint">
+          The code signs the other device in as you, and can only be used once.
+        </p>
+      )}
 
       {error ? <p className="error">{error}</p> : null}
     </Sheet>

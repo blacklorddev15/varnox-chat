@@ -1,6 +1,6 @@
 import { publicUser, setSessionCookie, verifyPassword } from '@/lib/auth';
-import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
-import { getUserByEmail, getUserByPhone, getUserByUsername, saveUser } from '@/lib/db';
+import { bad, clean, clientIp, deviceLabel, handle, ok, readJsonBody, userAgent } from '@/lib/api';
+import { createDevice, getUserByEmail, getUserByPhone, getUserByUsername, saveUser } from '@/lib/db';
 import { normaliseEmail } from '@/lib/email';
 import { normalisePhone } from '@/lib/phone';
 
@@ -37,7 +37,14 @@ export async function POST(req: Request) {
 
     const fresh = { ...user, lastSeen: Date.now() };
     await saveUser(fresh);
-    await setSessionCookie(user.id);
+    // A sign-in is a device too, so it shows up in Linked devices and can be revoked from
+    // another one rather than living on as an invisible session.
+    const device = await createDevice(user.id, {
+      label: deviceLabel(req),
+      userAgent: userAgent(req),
+      ip: clientIp(req),
+    });
+    await setSessionCookie(user.id, device.id);
     return ok({ user: publicUser(fresh) });
   });
 }

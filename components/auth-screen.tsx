@@ -15,7 +15,7 @@ import { IconLogo } from './icons';
  * accounts created before phone login did have a password and must keep working.
  */
 
-type Step = 'phone' | 'code' | 'name' | 'password';
+type Step = 'phone' | 'code' | 'name' | 'password' | 'link';
 
 type Country = { dial: string; label: string };
 
@@ -79,6 +79,8 @@ export function AuthScreen({ next }: { next?: string }) {
 
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  /** The code shown by a device that is already signed in, typed here to sign this one in. */
+  const [linkCode, setLinkCode] = useState('');
   const [passwordMode, setPasswordMode] = useState<'login' | 'register'>('login');
   /**
    * Creating an account collects a phone number, then a username, then a password, then an
@@ -182,6 +184,25 @@ export function AuthScreen({ next }: { next?: string }) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
       setDigits(Array(CODE_LENGTH).fill(''));
       boxes.current[0]?.focus();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Sign in with a code from a device that is already signed in. The server sets the session
+   * cookie on the way back, so this leaves through the same door as every other path.
+   */
+  async function submitLinkCode(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await post('/api/link/redeem', { code: linkCode.trim() });
+      finish();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
       setBusy(false);
     }
@@ -396,6 +417,9 @@ export function AuthScreen({ next }: { next?: string }) {
               <button type="button" onClick={() => { setStep('password'); setError(''); setNotice(''); }}>
                 Use a password instead
               </button>
+              <button type="button" onClick={() => { setStep('link'); setError(''); setNotice(''); }}>
+                Link a device
+              </button>
             </div>
 
             <p className="hint" style={{ marginTop: 16 }}>
@@ -461,6 +485,50 @@ export function AuthScreen({ next }: { next?: string }) {
               )}
               <button type="button" onClick={() => { setStep('phone'); setError(''); setNotice(''); }}>
                 Change number
+              </button>
+            </div>
+          </>
+        ) : null}
+
+        {step === 'link' ? (
+          <>
+            <h1>Link a device</h1>
+            <p className="sub">
+              On a device that is already signed in to Varnox, open Settings, choose Linked
+              devices and tap Link a device. Type the code it shows here.
+            </p>
+            <form onSubmit={submitLinkCode}>
+              <div className="field-row">
+                <label htmlFor="link-code">Code from your other device</label>
+                <input
+                  id="link-code"
+                  className="input"
+                  value={linkCode}
+                  onChange={(e) => setLinkCode(e.target.value)}
+                  placeholder="ABCD2345"
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  autoFocus
+                  required
+                />
+                <p className="hint" style={{ marginTop: 6 }}>
+                  The code lasts two minutes and only works once.
+                </p>
+              </div>
+
+              {error ? <p className="error">{error}</p> : null}
+
+              <button className="btn" type="submit" disabled={busy || linkCode.trim().length < 8}>
+                {busy ? 'Linking…' : 'Link this device'}
+              </button>
+            </form>
+
+            <div className="switch-line">
+              <button type="button" onClick={() => { setStep('phone'); setError(''); }}>
+                Use a phone code instead
+              </button>
+              <button type="button" onClick={() => { setStep('password'); setError(''); }}>
+                Use a password instead
               </button>
             </div>
           </>
@@ -553,6 +621,9 @@ export function AuthScreen({ next }: { next?: string }) {
               </button>
               <button type="button" onClick={() => { setStep('phone'); setError(''); }}>
                 Use a phone code instead
+              </button>
+              <button type="button" onClick={() => { setStep('link'); setError(''); }}>
+                Link a device
               </button>
             </div>
           </>

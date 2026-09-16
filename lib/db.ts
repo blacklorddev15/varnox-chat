@@ -1,12 +1,14 @@
+import crypto from 'node:crypto';
 import { cached, invalidate } from './cache';
 import { normaliseEmail } from './email';
-import { rand } from './ids';
+import { newId, rand } from './ids';
 import { q } from './pg';
 import { looksLikePhone, phoneKey } from './phone';
 import type {
   ChatPrefs,
   Conv,
   ConvType,
+  Device,
   Invite,
   MemberMarker,
   Message,
@@ -1286,4 +1288,213 @@ export async function findUserByPhone(phone: string): Promise<User | null> {
   if (viaIndex) return viaIndex;
   const rows = await q<{ id: string }>('select id from vx_users where phone = $1 limit 1', [phone]);
   return rows[0] ? getUser(rows[0].id) : null;
+}
+
+/* ── linked devices ────────────────────────────────────────────────────── */
+
+/**
+ * Linking a device: a short code is shown on an account that is already signed in, typed on
+ * another device, and the second device gets a session of its own.
+ *
+ * The code is the only credential in that exchange, so it is short-lived, single-use, and
+ * never stored in the clear beyond its two minutes. Each device gets a row and the session
+ * carries its id, which is what lets a device be signed out from somewhere else — see
+ * isDeviceActive() and revokeDevice().
+ */
+
+/** How long a code is good for. Long enough to read off one screen and type into another. */
+export const LINK_CODE_TTL_MS = 2 * 60_000;
+
+/**
+ * The alphabet a code is drawn from: A-Z and 2-9 with I, O, 0 and 1 left out, because the
+ * code is read off one screen and typed into another, and those are the pairs people
+ * misread. Exactly thirty-two characters, so mapping a byte onto it carries no modulo bias.
+ */
+const LINK_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+/** Eight characters from a CSPRNG — never Math.random, which is not unpredictable. */
+function newLinkCode(): string {
+  const bytes = crypto.randomBytes(8);
+  let out = '';
+  for (const byte of bytes) out += LINK_ALPHABET[byte % LINK_ALPHABET.length];
+  return out;
+}
+
+/** What is recorded about a client when it first signs in. */
+type DeviceInfo = {
+  label?: string | null;
+  userAgent?: string | null;
+  ip?: string | null;
+};
+
+type DeviceRow = {
+  id: string;
+  label: string | null;
+  user_agent: string | null;
+  ip: string | null;
+  created_at: number;
+  last_seen: number;
+};
+
+function toDevice(r: DeviceRow): Device {
+  return {
+    id: r.id,
+    label: r.label ?? null,
+    userAgent: r.user_agent ?? null,
+    ip: r.ip ?? null,
+    createdAt: Number(r.created_at),
+    lastSeen: Number(r.last_seen),
+    // The datastore cannot know which device is asking. The API marks that one.
+    current: false,
+  };
+}
+
+export async function createDevice(userId: string, info: DeviceInfo = {}): Promise<Device> {
+  const now = Date.now();
+  const device: Device = {
+    id: newId('d'),
+    label: info.label ?? null,
+    userAgent: info.userAgent ?? null,
+    ip: info.ip ?? null,
+    createdAt: now,
+    lastSeen: now,
+    current: false,
+  };
+  await q(
+    `insert into vx_devices (id, user_id, label, user_agent, ip, created_at, last_seen, revoked_at)
+     values ($1, $2, $3, $4, $5, $6, $7, null)`,
+    [device.id, userId, device.label, device.userAgent, device.ip, device.createdAt, device.lastSeen]
+  );
+  return device;
+}
+
+/** A device that is still signed in, or null once it has been revoked. */
+export async function deviceById(id: string): Promise<Device | null> {
+  if (!id) return null;
+  const rows = await q<DeviceRow>(
+    `select id, label, user_agent, ip, created_at, last_seen
+       from vx_devices
+      where id = $1 and revoked_at is null`,
+    [id]
+  );
+  return rows[0] ? toDevice(rows[0]) : null;
+}
+
+/** Every device still signed in to the account, newest first. Marking the current one is
+ *  the caller's job, because only the caller can see the session cookie. */
+export async function listDevices(userId: string): Promise<Device[]> {
+  const rows = await q<DeviceRow>(
+    `select id, label, user_agent, ip, created_at, last_seen
+       from vx_devices
+      where user_id = $1 and revoked_at is null
+      order by created_at desc`,
+    [userId]
+  );
+  return rows.map(toDevice);
+}
+
+/** Note that a device is still in use — called when its owner opens the device list. */
+export async function touchDevice(deviceId: string): Promise<void> {
+  await q('update vx_devices set last_seen = $2 where id = $1 and revoked_at is null', [
+    deviceId,
+    Date.now(),
+  ]);
+}
+
+/**
+ * Sign a device out.
+ *
+ * Scoped by `user_id`, so one account can never revoke a device belonging to another. The
+ * cached liveness check is dropped as well, so the change takes effect on this process at
+ * once rather than after the cache entry expires.
+ */
+export async function revokeDevice(userId: string, deviceId: string): Promise<boolean> {
+  const rows = await q(
+    `update vx_devices set revoked_at = $3
+      where id = $1 and user_id = $2 and revoked_at is null
+      returning id`,
+    [deviceId, userId, Date.now()]
+  );
+  if (!rows.length) return false;
+  invalidate(`dev:${deviceId}`);
+  return true;
+}
+
+/**
+ * How long a revocation may go unnoticed on a process that has just checked.
+ *
+ * currentUser() asks this on every authenticated request, so it is cached rather than
+ * costing a database round trip each time. The trade-off is deliberate and bounded: a
+ * revocation is seen everywhere within about ten seconds, and immediately on the process
+ * that performed it, because revokeDevice() invalidates the entry.
+ */
+const DEVICE_ACTIVE_MS = 10_000;
+
+export async function isDeviceActive(deviceId: string): Promise<boolean> {
+  if (!deviceId) return false;
+  return cached(`dev:${deviceId}`, DEVICE_ACTIVE_MS, async () => {
+    const rows = await q('select 1 from vx_devices where id = $1 and revoked_at is null', [deviceId]);
+    return rows.length > 0;
+  });
+}
+
+export type LinkCode = { code: string; expiresInSec: number };
+
+/**
+ * Mint a link code for an account.
+ *
+ * Only one code per account is ever live: the previous one is marked consumed before the new
+ * one exists, so a code read over someone's shoulder and then replaced is useless. Expired
+ * rows are swept here, opportunistically, for the same reason putOtp() sweeps its own — a
+ * serverless deployment has nowhere to hang a scheduled job.
+ */
+export async function createLinkCode(userId: string): Promise<LinkCode> {
+  const now = Date.now();
+  await q('delete from vx_link_codes where expires_at < $1', [now - 86_400_000]);
+  await q('update vx_link_codes set consumed_at = $2 where user_id = $1 and consumed_at is null', [
+    userId,
+    now,
+  ]);
+
+  const code = newLinkCode();
+  await q(
+    `insert into vx_link_codes (code, user_id, created_at, expires_at, consumed_at, consumed_agent)
+     values ($1, $2, $3, $4, null, null)`,
+    [code, userId, now, now + LINK_CODE_TTL_MS]
+  );
+  return { code, expiresInSec: Math.round(LINK_CODE_TTL_MS / 1000) };
+}
+
+/**
+ * Spend a link code and create the device it signs in.
+ *
+ * The update is the whole of the check: it matches only while the code is unconsumed and
+ * unexpired, so of two simultaneous attempts carrying the same code exactly one changes a
+ * row and the other is refused. A read-then-write would let both through, and one code would
+ * sign in two devices.
+ *
+ * Returns null for every kind of failure — unknown, expired or already used — because the
+ * caller must not be able to tell them apart.
+ */
+export async function redeemLinkCode(
+  code: string,
+  agent: DeviceInfo
+): Promise<{ userId: string; deviceId: string } | null> {
+  // Typed from a screen, so case and stray spaces are forgiven: the alphabet has neither.
+  const cleaned = code.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  if (cleaned.length < 8) return null;
+
+  const now = Date.now();
+  const rows = await q<{ user_id: string }>(
+    `update vx_link_codes
+        set consumed_at = $2, consumed_agent = $3
+      where code = $1 and consumed_at is null and expires_at > $2
+      returning user_id`,
+    [cleaned, now, agent.userAgent ?? null]
+  );
+  const row = rows[0];
+  if (!row) return null;
+
+  const device = await createDevice(row.user_id, agent);
+  return { userId: row.user_id, deviceId: device.id };
 }

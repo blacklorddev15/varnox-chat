@@ -202,6 +202,27 @@ export type Invite = {
 export type SessionPayload = {
   uid: string;
   exp: number;
+  /**
+   * The device this session was issued to. Absent on cookies minted before devices existed,
+   * which is why every check on it has to tolerate its absence.
+   */
+  did?: string;
+};
+
+/**
+ * One device signed in to an account.
+ *
+ * `current` is not stored: it describes the device making the request, so the datastore
+ * always returns it false and the API marks the caller's own row.
+ */
+export type Device = {
+  id: string;
+  label: string | null;
+  userAgent: string | null;
+  ip: string | null;
+  createdAt: number;
+  lastSeen: number;
+  current: boolean;
 };
 
 /** Shape returned by the API for one conversation in the sidebar. */
