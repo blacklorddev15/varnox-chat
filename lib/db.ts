@@ -5,6 +5,9 @@ import { newId, rand } from './ids';
 import { q } from './pg';
 import { looksLikePhone, phoneKey } from './phone';
 import type {
+  Channel,
+  ChannelFollower,
+  ChannelPost,
   ChatPrefs,
   Conv,
   ConvType,
@@ -1748,4 +1751,393 @@ export async function deleteStatus(statusId: string, userId: string): Promise<bo
   if (!rows.length) return false;
   await q(`delete from vx_status_views where status_id = $1`, [statusId]);
   return true;
+}
+
+/* ── channels (broadcast) ──────────────────────────────────────────────── */
+
+type ChannelRow = {
+  id: string;
+  owner_id: string;
+  name: string;
+  description: string | null;
+  avatar: string | null;
+  created_at: number;
+  following: boolean;
+  followers: number;
+  unread: number;
+  last_id: string | null;
+  last_kind: string | null;
+  last_text: string | null;
+  last_media_url: string | null;
+  last_created_at: number | null;
+};
+
+function toChannelPost(r: {
+  id: string;
+  channel_id: string;
+  author_id: string;
+  kind: string;
+  text: string | null;
+  media_url: string | null;
+  created_at: number;
+}): ChannelPost {
+  return {
+    id: r.id,
+    channelId: r.channel_id,
+    authorId: r.author_id,
+    kind: r.kind === 'image' ? 'image' : 'text',
+    text: r.text ?? null,
+    mediaUrl: r.media_url ?? null,
+    createdAt: Number(r.created_at),
+  };
+}
+
+function toChannel(r: ChannelRow, viewerId: string): Channel {
+  const lastPost: ChannelPost | null = r.last_id
+    ? {
+        id: r.last_id,
+        channelId: r.id,
+        authorId: r.owner_id,
+        kind: r.last_kind === 'image' ? 'image' : 'text',
+        text: r.last_text ?? null,
+        mediaUrl: r.last_media_url ?? null,
+        createdAt: Number(r.last_created_at ?? 0),
+      }
+    : null;
+  return {
+    id: r.id,
+    ownerId: r.owner_id,
+    name: r.name,
+    description: r.description ?? null,
+    avatar: r.avatar ?? null,
+    createdAt: Number(r.created_at),
+    isOwner: r.owner_id === viewerId,
+    // An owner counts as following their own channel: they were made its first follower.
+    following: Boolean(r.following),
+    followers: Number(r.followers ?? 0),
+    unread: Number(r.unread ?? 0),
+    lastPostAt: r.last_created_at === null ? null : Number(r.last_created_at),
+    lastPost,
+  };
+}
+
+/**
+ * The one read every channel list and the channel header share.
+ *
+ * The three per-viewer numbers are folded into the query rather than fetched per row, so a
+ * list of fifty channels is still one statement:
+ *  - `following` — the owner always is, everyone else only with a vx_channel_follows row;
+ *  - `followers` — the audience size the header shows;
+ *  - `unread` — posts newer than the viewer's own read mark.
+ *
+ * The newest post rides along from a lateral join, which is what lets a list row show a
+ * preview without a request per channel. The viewer placeholder is passed in because a query
+ * numbering its parameters differently still has to be able to use this — the same reason
+ * STATUS_COLUMNS hard-codes $2 and requires the caller to match.
+ */
+function channelQuery(viewer: string): string {
+  return `select
+    c.*,
+    (c.owner_id = ${viewer} or exists (
+      select 1 from vx_channel_follows f
+       where f.channel_id = c.id and f.user_id = ${viewer}
+    )) as following,
+    (select count(*) from vx_channel_follows f where f.channel_id = c.id) as followers,
+    (select count(*) from vx_channel_posts p
+      where p.channel_id = c.id
+        and p.created_at > coalesce((
+          select f.last_read_at from vx_channel_follows f
+           where f.channel_id = c.id and f.user_id = ${viewer}
+        ), 0)) as unread,
+    newest.id as last_id,
+    newest.kind as last_kind,
+    newest.text as last_text,
+    newest.media_url as last_media_url,
+    newest.created_at as last_created_at
+  from vx_channels c
+  left join lateral (
+    select p.id, p.kind, p.text, p.media_url, p.created_at
+      from vx_channel_posts p
+     where p.channel_id = c.id
+     order by p.created_at desc
+     limit 1
+  ) newest on true`;
+}
+
+/**
+ * Create a broadcast. The creator is its first follower, so a channel they own behaves
+ * exactly like one they follow everywhere else.
+ */
+export async function createChannel(
+  ownerId: string,
+  input: { name: string; description?: string | null; avatar?: string | null }
+): Promise<Channel> {
+  const now = Date.now();
+  const id = newId('ch');
+  const channel: Channel = {
+    id,
+    ownerId,
+    name: input.name,
+    description: input.description ?? null,
+    avatar: input.avatar ?? null,
+    createdAt: now,
+    isOwner: true,
+    following: true,
+    followers: 1,
+    unread: 0,
+    lastPostAt: null,
+    lastPost: null,
+  };
+  await q(
+    `insert into vx_channels (id, owner_id, name, description, avatar, created_at)
+     values ($1, $2, $3, $4, $5, $6)`,
+    [id, ownerId, channel.name, channel.description, channel.avatar, now]
+  );
+  // Read mark equal to now: an empty channel starts with nothing unseen, and the owner's own
+  // posts are stamped forward in createChannelPost.
+  await q(
+    `insert into vx_channel_follows (channel_id, user_id, followed_at, last_read_at)
+     values ($1, $2, $3, $3)
+     on conflict (channel_id, user_id) do nothing`,
+    [id, ownerId, now]
+  );
+  return channel;
+}
+
+/**
+ * The channels the viewer follows, most recently active first, with the ones they own in the
+ * same list — an owner follows their own channel, so no special case is needed.
+ */
+export async function listMyChannels(userId: string): Promise<Channel[]> {
+  const rows = await q<ChannelRow>(
+    `${channelQuery('$1')}
+      where exists (
+        select 1 from vx_channel_follows f
+         where f.channel_id = c.id and f.user_id = $1
+      )
+      order by coalesce(newest.created_at, c.created_at) desc
+      limit 100`,
+    [userId]
+  );
+  return rows.map((row) => toChannel(row, userId));
+}
+
+/**
+ * Channels the viewer does not follow yet, most followed first.
+ *
+ * No visibility rule beyond the follow: unlike a status, a channel is a public broadcast by
+ * nature, and a list nobody may appear in would be a list nobody could ever join.
+ */
+export async function listDiscoverableChannels(userId: string): Promise<Channel[]> {
+  const rows = await q<ChannelRow>(
+    `${channelQuery('$1')}
+      where c.owner_id <> $1
+        and not exists (
+          select 1 from vx_channel_follows f
+           where f.channel_id = c.id and f.user_id = $1
+        )
+      order by followers desc, c.created_at desc
+      limit 50`,
+    [userId]
+  );
+  return rows.map((row) => toChannel(row, userId));
+}
+
+/**
+ * One channel, provided the viewer may read it: a follower, or the owner whether or not a
+ * follow row exists.
+ *
+ * Null for both "no such channel" and "not yours to read" — the route turns either into the
+ * same 404, so a stranger cannot learn which channel ids exist by asking for them.
+ */
+export async function getChannel(channelId: string, userId: string): Promise<Channel | null> {
+  if (!channelId) return null;
+  const rows = await q<ChannelRow>(
+    `${channelQuery('$2')}
+      where c.id = $1
+        and (c.owner_id = $2 or exists (
+          select 1 from vx_channel_follows f
+           where f.channel_id = c.id and f.user_id = $2
+        ))
+      limit 1`,
+    [channelId, userId]
+  );
+  return rows[0] ? toChannel(rows[0], userId) : null;
+}
+
+/**
+ * Follow a channel.
+ *
+ * Idempotent: a double tap writes nothing the second time, so the audience cannot be
+ * double-counted. `last_read_at` starts at now rather than 0, because joining a broadcast
+ * means the posts already there are not "unseen" — only what arrives afterwards is.
+ */
+export async function followChannel(channelId: string, userId: string): Promise<void> {
+  const now = Date.now();
+  const found = await q<{ id: string }>(`select id from vx_channels where id = $1`, [channelId]);
+  if (!found.length) throw new Error('Channel not found');
+  await q(
+    `insert into vx_channel_follows (channel_id, user_id, followed_at, last_read_at)
+     values ($1, $2, $3, $3)
+     on conflict (channel_id, user_id) do nothing`,
+    [channelId, userId, now]
+  );
+}
+
+/**
+ * Leave a channel. An owner cannot leave their own — there would then be nobody able to post
+ * and no way back in, so it is refused rather than silently ignored.
+ */
+export async function unfollowChannel(channelId: string, userId: string): Promise<boolean> {
+  const rows = await q<{ owner_id: string }>(
+    `select owner_id from vx_channels where id = $1`,
+    [channelId]
+  );
+  const channel = rows[0];
+  if (!channel) throw new Error('Channel not found');
+  if (channel.owner_id === userId) {
+    throw new Error('Forbidden: an owner cannot leave their own channel');
+  }
+  const removed = await q<{ channel_id: string }>(
+    `delete from vx_channel_follows
+      where channel_id = $1 and user_id = $2
+      returning channel_id`,
+    [channelId, userId]
+  );
+  return removed.length > 0;
+}
+
+/**
+ * The posts of one channel, oldest first, limited to the newest `limit` of them.
+ *
+ * The visibility rule is repeated here rather than trusted from the caller, so a route that
+ * ever forgot to check would return posts belonging to a stranger's broadcast. An empty list
+ * is a channel with nothing in it; a viewer who may not read gets the same empty list, and
+ * every route reaches this only after getChannel has already refused them.
+ */
+export async function listChannelPosts(
+  channelId: string,
+  viewerId: string,
+  limit = 100
+): Promise<ChannelPost[]> {
+  const capped = Math.max(1, Math.min(200, Math.floor(limit) || 100));
+  const rows = await q<{
+    id: string;
+    channel_id: string;
+    author_id: string;
+    kind: string;
+    text: string | null;
+    media_url: string | null;
+    created_at: number;
+  }>(
+    `select * from (
+       select p.id, p.channel_id, p.author_id, p.kind, p.text, p.media_url, p.created_at
+         from vx_channel_posts p
+         join vx_channels c on c.id = p.channel_id
+        where p.channel_id = $1
+          and (c.owner_id = $2 or exists (
+            select 1 from vx_channel_follows f
+             where f.channel_id = c.id and f.user_id = $2
+          ))
+        order by p.created_at desc
+        limit $3
+     ) newest
+     order by newest.created_at asc`,
+    [channelId, viewerId, capped]
+  );
+  return rows.map(toChannelPost);
+}
+
+/**
+ * Post to a channel.
+ *
+ * Ownership is enforced in the statement itself, not only before it: the insert selects its
+ * one row from vx_channels with the owner in the where clause, so a caller who is not the
+ * owner writes nothing and no row comes back — the check and the write cannot disagree.
+ */
+export async function createChannelPost(
+  channelId: string,
+  authorId: string,
+  input: { kind: ChannelPost['kind']; text?: string | null; mediaUrl?: string | null }
+): Promise<ChannelPost> {
+  const now = Date.now();
+  const post: ChannelPost = {
+    id: newId('cp'),
+    channelId,
+    authorId,
+    kind: input.kind,
+    text: input.text ?? null,
+    mediaUrl: input.mediaUrl ?? null,
+    createdAt: now,
+  };
+  const rows = await q<{ id: string }>(
+    `insert into vx_channel_posts (id, channel_id, author_id, kind, text, media_url, created_at)
+     select $2, c.id, $3, $4, $5, $6, $7
+       from vx_channels c
+      where c.id = $1 and c.owner_id = $3
+     returning id`,
+    [channelId, post.id, authorId, post.kind, post.text, post.mediaUrl, now]
+  );
+  if (!rows.length) throw new Error('Forbidden: only the channel owner can post');
+
+  // Your own post is never unread to you: move your own read mark forward with it.
+  await q(
+    `update vx_channel_follows set last_read_at = $3
+      where channel_id = $1 and user_id = $2 and last_read_at < $3`,
+    [channelId, authorId, now]
+  );
+  return post;
+}
+
+/**
+ * Move the viewer's read mark to now, which is what clears the unread dot on the list.
+ *
+ * A no-op for anyone without a follow row — including the owner of a channel whose own post
+ * never left anything unread in the first place.
+ */
+export async function markChannelRead(channelId: string, userId: string): Promise<void> {
+  const now = Date.now();
+  await q(
+    `update vx_channel_follows set last_read_at = $3
+      where channel_id = $1 and user_id = $2 and last_read_at < $3`,
+    [channelId, userId, now]
+  );
+}
+
+/**
+ * Who follows one of your channels, most recent first.
+ *
+ * The join to vx_channels enforces ownership in the query itself rather than trusting the
+ * caller, so a non-owner reads nothing even if a route ever forgot to check — the same
+ * arrangement as listStatusViewers.
+ */
+export async function getChannelFollowers(
+  channelId: string,
+  ownerId: string
+): Promise<ChannelFollower[]> {
+  const rows = await q<{ user_id: string; followed_at: number }>(
+    `select f.user_id, f.followed_at
+       from vx_channel_follows f
+       join vx_channels c on c.id = f.channel_id
+      where f.channel_id = $1 and c.owner_id = $2
+      order by f.followed_at desc`,
+    [channelId, ownerId]
+  );
+
+  const followers: ChannelFollower[] = [];
+  for (const row of rows) {
+    const user = await getUser(row.user_id);
+    if (!user) continue;
+    const settings = await getSettings(row.user_id);
+    followers.push({
+      user: {
+        ...toPublicUser(user),
+        // The same projection the updates screen applies: a photo hidden from everyone else
+        // is hidden in a follower list too.
+        avatar: settings.privacy.profilePhoto !== 'nobody' ? user.avatar : null,
+      },
+      followedAt: Number(row.followed_at),
+    });
+  }
+  return followers;
 }

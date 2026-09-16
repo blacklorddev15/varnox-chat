@@ -51,6 +51,25 @@ export function IconUpdates({ size = 22, className }: P) {
   );
 }
 
+/** Channels: a megaphone, the one-to-many mark — the owner speaks, the followers listen. */
+export function IconChannel({ size = 22, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
+      <path d="M3.8 10.4 19.2 4.4v11.2L3.8 13.6z" />
+      <path d="M7.4 14v3.1a1.7 1.7 0 0 0 3.4 0v-2.5" />
+      <path d="M21.6 8.6a4.4 4.4 0 0 1 0 5.4" />
+    </svg>
+  );
+}
+
+export function IconPlus({ size = 20, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S} strokeWidth="2">
+      <path d="M12 5.5v13M5.5 12h13" />
+    </svg>
+  );
+}
+
 export function IconGroup({ size = 22, className }: P) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>

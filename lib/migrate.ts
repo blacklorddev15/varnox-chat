@@ -165,6 +165,58 @@ const STEPS: Step[] = [
             primary key (status_id, viewer_id)
           )`,
   },
+  {
+    kind: 'table',
+    label: 'vx_channels',
+    sql: `create table if not exists vx_channels (
+            id text primary key,
+            owner_id text not null,
+            name text not null,
+            description text,
+            avatar text,
+            created_at bigint not null
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_channels_owner',
+    sql: `create index if not exists vx_channels_owner on vx_channels (owner_id)`,
+  },
+  {
+    kind: 'table',
+    label: 'vx_channel_follows',
+    sql: `create table if not exists vx_channel_follows (
+            channel_id text not null,
+            user_id text not null,
+            followed_at bigint not null,
+            last_read_at bigint not null default 0,
+            primary key (channel_id, user_id)
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_channel_follows_user',
+    sql: `create index if not exists vx_channel_follows_user on vx_channel_follows (user_id)`,
+  },
+  {
+    kind: 'table',
+    label: 'vx_channel_posts',
+    sql: `create table if not exists vx_channel_posts (
+            id text primary key,
+            channel_id text not null,
+            author_id text not null,
+            kind text not null,
+            text text,
+            media_url text,
+            created_at bigint not null
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_channel_posts_channel',
+    sql: `create index if not exists vx_channel_posts_channel
+            on vx_channel_posts (channel_id, created_at desc)`,
+  },
 ];
 
 /** A request waits this long for reconciliation, then carries on without it. */

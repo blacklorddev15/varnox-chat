@@ -4,10 +4,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatRow, PublicUser, UserSettings } from '@/lib/types';
 import { listStamp, shortPreview } from '@/lib/format';
 import { Avatar } from './avatar';
+import { ChannelsScreen } from './channels';
 import { UpdatesScreen } from './updates';
 import {
   IconArchive,
   IconBellOff,
+  IconChannel,
   IconChat,
   IconCheck,
   IconDoc,
@@ -59,9 +61,9 @@ export function Sidebar({
   ready: boolean;
   selectedId: string | null;
   filter: 'all' | 'unread' | 'groups';
-  /** Which of the two phone tabs the sidebar is showing. Ignored on wide screens. */
-  tab: 'chats' | 'updates';
-  onTab: (tab: 'chats' | 'updates') => void;
+  /** Which phone tab the sidebar is showing. Ignored on wide screens. */
+  tab: 'chats' | 'updates' | 'channels';
+  onTab: (tab: 'chats' | 'updates' | 'channels') => void;
   onToast: (message: string) => void;
   onFilter: (f: 'all' | 'unread' | 'groups') => void;
   onSelectChat: (id: string) => void;
@@ -353,12 +355,14 @@ export function Sidebar({
     <aside className="sidebar">
       {tab === 'updates' ? (
         <UpdatesScreen me={me} onBack={() => onTab('chats')} onToast={onToast} />
+      ) : tab === 'channels' ? (
+        <ChannelsScreen onBack={() => onTab('chats')} onToast={onToast} />
       ) : (
         chatsTab
       )}
 
       {/* Phone layout only: the tab bar is hidden on wide screens, which keep the header and
-          always show the chat list. Channels and Calls join it later, each with its own tab. */}
+          always show the chat list. Calls joins it later, with a tab of its own. */}
       <nav className="tab-bar">
         <button
           type="button"
@@ -375,6 +379,14 @@ export function Sidebar({
         >
           <IconUpdates size={21} />
           <span>Updates</span>
+        </button>
+        <button
+          type="button"
+          className={tab === 'channels' ? 'on' : ''}
+          onClick={() => onTab('channels')}
+        >
+          <IconChannel size={21} />
+          <span>Channels</span>
         </button>
       </nav>
     </aside>

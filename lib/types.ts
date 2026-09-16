@@ -286,3 +286,52 @@ export type StatusViewer = {
   user: PublicUser;
   viewedAt: number;
 };
+
+/**
+ * One post in a channel.
+ *
+ * Deliberately plain: no reply, no forward, no view-once and no per-recipient status,
+ * because a broadcast is read rather than delivered to anyone in particular.
+ */
+export type ChannelPost = {
+  id: string;
+  channelId: string;
+  authorId: string;
+  kind: 'text' | 'image';
+  text: string | null;
+  mediaUrl: string | null;
+  createdAt: number;
+};
+
+/**
+ * One broadcast channel, as the signed-in user sees it.
+ *
+ * The three per-viewer fields are derived on every read rather than stored, so they cannot
+ * drift from the rows they describe: `isOwner` decides whether a composer is drawn at all,
+ * `following` whether the viewer is offered "follow" or "leave", and `unread` counts posts
+ * newer than the viewer's read mark.
+ *
+ * `lastPost` rides along so the channel list can show a one-line preview without a second
+ * request per row, and `lastPostAt` is kept separately because it is what the list sorts and
+ * dates a row by even when the post body is not shown.
+ */
+export type Channel = {
+  id: string;
+  ownerId: string;
+  name: string;
+  description: string | null;
+  avatar: string | null;
+  createdAt: number;
+  isOwner: boolean;
+  following: boolean;
+  followers: number;
+  unread: number;
+  lastPostAt: number | null;
+  lastPost: ChannelPost | null;
+};
+
+/** One follower of a channel, as its owner sees them. */
+export type ChannelFollower = {
+  user: PublicUser;
+  followedAt: number;
+};

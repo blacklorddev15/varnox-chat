@@ -25,9 +25,22 @@ url.searchParams.delete('channel_binding');
 
 const sql = await readFile(join(root, 'db', 'schema.sql'), 'utf8');
 
-// Strip /* */ comments, then split on statement boundaries. The schema has no functions or
+// Strip both comment styles, then split on statement boundaries. The schema has no functions or
 // dollar-quoted bodies, so splitting on semicolons is unambiguous.
-const withoutComments = sql.replace(/\/\*[\s\S]*?\*\//g, '');
+//
+// The line-comment pass is not cosmetic. Stripping only /* */ left `--` notes intact, so a `;`
+// typed inside one of them split the statement mid-comment and the remainder was sent to
+// Postgres on its own — which fails with `syntax error at or near "a"`, a message that points
+// at the schema rather than at this splitter. Two such semicolons had already crept into
+// db/schema.sql unnoticed, because the app's own migrations (lib/migrate.ts) apply the same
+// schema from an array of statements and never take this path. That is exactly why the bug
+// survived: only `npm run db:apply` could see it.
+//
+// Neither `--` nor `/* */` appears inside a string literal in this schema, so a plain strip is
+// safe here. If that ever stops being true, replace this with a real tokenizer.
+const withoutComments = sql
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/(^|\s)--[^\n]*/g, '$1');
 const statements = withoutComments
   .split(';')
   .map((s) => s.trim())
