@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { patch, post } from '@/lib/client';
+import { patch, post, uploadImage } from '@/lib/client';
+import { Avatar } from './avatar';
 import { IconLogo } from './icons';
 
 /**
@@ -80,12 +81,18 @@ export function AuthScreen({ next }: { next?: string }) {
   const [password, setPassword] = useState('');
   const [passwordMode, setPasswordMode] = useState<'login' | 'register'>('login');
   /**
-   * Creating an account collects a phone number, then an email address, then a password,
-   * one step at a time. The email is the only way back into the account if the number is
-   * lost, which is why it is asked for rather than made optional.
+   * Creating an account collects a phone number, then a username, then a password, then an
+   * optional profile picture, one step at a time. The username is the handle people search
+   * for, which is why it is asked for rather than generated silently.
    */
-  const [signupStep, setSignupStep] = useState<1 | 2 | 3>(1);
-  const [email, setEmail] = useState('');
+  const [signupStep, setSignupStep] = useState<1 | 2 | 3 | 4>(1);
+  const [username, setUsername] = useState('');
+  /** The uploaded address, once the picture has made it to the server. */
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  /** The picture as chosen, shown before (and even without) a successful upload. */
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const photoObjectUrl = useRef<string | null>(null);
+  const photoInput = useRef<HTMLInputElement | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -122,6 +129,13 @@ export function AuthScreen({ next }: { next?: string }) {
   useEffect(() => {
     if (step === 'code') boxes.current[0]?.focus();
   }, [step]);
+
+  useEffect(
+    () => () => {
+      if (photoObjectUrl.current) URL.revokeObjectURL(photoObjectUrl.current);
+    },
+    []
+  );
 
   async function sendCode(e?: React.FormEvent) {
     e?.preventDefault();
@@ -242,22 +256,53 @@ export function AuthScreen({ next }: { next?: string }) {
       return true;
     }
     if (signupStep === 2) {
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-        setError('Enter a valid email address, for example you@example.com');
+      const handle = username.trim().toLowerCase();
+      if (handle.length < 3 || handle.length > 20 || !/^[a-z0-9._]+$/.test(handle)) {
+        setError('Usernames are 3-20 characters: lowercase letters, numbers, underscore or dot');
         return false;
       }
+      setUsername(handle);
       setSignupStep(3);
       return true;
     }
     return true;
   }
 
+  /**
+   * Show the picture as soon as it is chosen, then squeeze and upload it. The picture is
+   * optional and the account already exists by this point, so a failed upload reports
+   * itself and nothing else: the way into the app stays open.
+   */
+  async function pickPhoto(file: File) {
+    if (photoObjectUrl.current) URL.revokeObjectURL(photoObjectUrl.current);
+    const local = URL.createObjectURL(file);
+    photoObjectUrl.current = local;
+    setPhotoPreview(local);
+    setBusy(true);
+    setError('');
+    try {
+      // uploadImage squeezes the picture itself, so it is not compressed twice here.
+      const res = await uploadImage(file);
+      await patch('/api/me', { avatar: res.url });
+      setAvatarUrl(res.url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not upload that picture');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submitPassword(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
-    // Pressing Enter in the phone or email step should advance, not submit the whole form.
+    // Pressing Enter in the phone or username step should advance, not submit the whole form.
     if (passwordMode === 'register' && signupStep < 3) {
       advanceSignup();
+      return;
+    }
+    // The picture step has nothing left to send, so Enter finishes like the buttons do.
+    if (passwordMode === 'register' && signupStep === 4) {
+      finish();
       return;
     }
     setBusy(true);
@@ -266,23 +311,26 @@ export function AuthScreen({ next }: { next?: string }) {
       if (passwordMode === 'register') {
         await post('/api/auth/register', {
           phone: composed(),
-          email: email.trim().toLowerCase(),
-          displayName: name,
+          username: username.trim().toLowerCase(),
           password,
         });
+        // The session cookie is already set, so the account exists: only the optional
+        // picture is left, and it is uploaded on its own rather than on the way in.
+        setSignupStep(4);
       } else {
         await post('/api/auth/login', { identifier, password });
+        finish();
       }
-      finish();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Something went wrong';
       setError(message);
-      // Send the user back to the step that owns the problem, so a rejected email does not
-      // look like a rejected password.
+      // Send the user back to the step that owns the problem, so a rejected username does
+      // not look like a rejected password.
       if (passwordMode === 'register') {
-        if (/email/i.test(message)) setSignupStep(2);
+        if (/username/i.test(message)) setSignupStep(2);
         else if (/phone/i.test(message)) setSignupStep(1);
       }
+    } finally {
       setBusy(false);
     }
   }
@@ -514,8 +562,14 @@ export function AuthScreen({ next }: { next?: string }) {
           <>
             <h1>Create an account</h1>
             <p className="sub">
-              Step {signupStep} of 3 —{' '}
-              {signupStep === 1 ? 'your phone number' : signupStep === 2 ? 'your email address' : 'a password'}
+              Step {signupStep} of 4 —{' '}
+              {signupStep === 1
+                ? 'your phone number'
+                : signupStep === 2
+                  ? 'a username'
+                  : signupStep === 3
+                    ? 'a password'
+                    : 'a profile picture'}
             </p>
             <form onSubmit={submitPassword}>
               {signupStep === 1 ? (
@@ -560,38 +614,26 @@ export function AuthScreen({ next }: { next?: string }) {
 
               {signupStep === 2 ? (
                 <div className="field-row">
-                  <label htmlFor="signupEmail">Email address</label>
+                  <label htmlFor="signupUsername">Username</label>
                   <input
-                    id="signupEmail"
+                    id="signupUsername"
                     className="input"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    autoComplete="email"
-                    inputMode="email"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="your.name"
+                    autoComplete="username"
+                    autoCapitalize="none"
                     autoFocus
                   />
                   <p className="hint" style={{ marginTop: 6 }}>
-                    Used to sign in and to recover the account.
+                    Lowercase letters, numbers, underscore or dot, 3-20 characters. This is how
+                    people find you on Varnox.
                   </p>
                 </div>
               ) : null}
 
               {signupStep === 3 ? (
                 <>
-                  <div className="field-row">
-                    <label htmlFor="regName">Your name</label>
-                    <input
-                      id="regName"
-                      className="input"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="Optional — how your name appears in chats"
-                      autoFocus
-                    />
-                  </div>
-
                   <div className="field-row">
                     <label htmlFor="password">Password</label>
                     <input
@@ -602,11 +644,56 @@ export function AuthScreen({ next }: { next?: string }) {
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="At least 6 characters"
                       autoComplete="new-password"
+                      autoFocus
                     />
                   </div>
 
                   <p className="hint" style={{ marginTop: 6 }}>
-                    {composed()} · {email.trim().toLowerCase()}
+                    {composed()} · {username.trim().toLowerCase()}
+                  </p>
+                </>
+              ) : null}
+
+              {signupStep === 4 ? (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 4 }}>
+                    <button
+                      type="button"
+                      onClick={() => photoInput.current?.click()}
+                      title="Choose a picture"
+                    >
+                      <Avatar
+                        name={username.trim() || 'You'}
+                        src={photoPreview ?? avatarUrl}
+                        size={84}
+                      />
+                    </button>
+                    <div>
+                      <button
+                        type="button"
+                        className="btn ghost"
+                        onClick={() => photoInput.current?.click()}
+                        disabled={busy}
+                      >
+                        {busy ? 'Uploading…' : photoPreview ? 'Change picture' : 'Choose a picture'}
+                      </button>
+                      <input
+                        ref={photoInput}
+                        type="file"
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          // Clear it so the same file can be picked again after a failure.
+                          e.target.value = '';
+                          if (file) void pickPhoto(file);
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <p className="hint" style={{ marginTop: 6 }}>
+                    Optional — you can add or change it later in Settings.
                   </p>
                 </>
               ) : null}
@@ -617,19 +704,30 @@ export function AuthScreen({ next }: { next?: string }) {
                 <button className="btn" type="button" onClick={advanceSignup}>
                   Continue
                 </button>
-              ) : (
+              ) : signupStep === 3 ? (
                 <button className="btn" type="submit" disabled={busy}>
                   {busy ? 'Creating…' : 'Create account'}
+                </button>
+              ) : (
+                // Nothing is awaited on the way in: the picture uploads on its own, and
+                // finishing is immediate whether or not it has landed.
+                <button className="btn" type="button" onClick={finish}>
+                  Get started
                 </button>
               )}
             </form>
 
             <div className="switch-line">
+              {signupStep === 4 ? (
+                <button type="button" onClick={finish}>
+                  Skip for now
+                </button>
+              ) : null}
               {signupStep > 1 ? (
                 <button
                   type="button"
                   onClick={() => {
-                    setSignupStep((s) => (s === 3 ? 2 : 1));
+                    setSignupStep((s) => (s === 4 ? 3 : s === 3 ? 2 : 1));
                     setError('');
                   }}
                 >
