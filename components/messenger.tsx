@@ -317,19 +317,39 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
     loadChats();
   }, [loadChats]);
 
+  /* One poll at a time. On a cold serverless database a request can take longer than the
+     interval, and without this the ticks stack up into a queue of overlapping queries that
+     makes the app feel slower the longer it stays open. */
+  const listBusy = useRef(false);
+  const chatBusy = useRef(false);
+
   useEffect(() => {
-    const tick = () => {
-      if (document.visibilityState === 'visible') loadChats();
+    const tick = async () => {
+      if (document.visibilityState !== 'visible' || listBusy.current) return;
+      listBusy.current = true;
+      try {
+        await loadChats();
+      } finally {
+        listBusy.current = false;
+      }
     };
-    const id = window.setInterval(tick, 3500);
+    // 8s rather than 3.5s: a chat list is glancing information, and every poll costs a round
+    // trip to a serverless function and a fresh connection through the database pooler.
+    const id = window.setInterval(tick, 8000);
     return () => window.clearInterval(id);
   }, [loadChats]);
 
   useEffect(() => {
     if (!selectedId) return;
-    const id = window.setInterval(() => {
-      if (document.visibilityState === 'visible') pollOpenChat();
-    }, 2000);
+    const id = window.setInterval(async () => {
+      if (document.visibilityState !== 'visible' || chatBusy.current) return;
+      chatBusy.current = true;
+      try {
+        await pollOpenChat();
+      } finally {
+        chatBusy.current = false;
+      }
+    }, 4000);
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
         pollOpenChat();
