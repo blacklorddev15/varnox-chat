@@ -3151,3 +3151,76 @@ html[data-theme='dark'] .bubble.tail-out {
 .hint.error {
   color: var(--danger, #c0392b);
 }
+
+/* ── suspended account ──────────────────────────────────────────────────────── */
+
+/* Shown instead of the app when an account has been locked out. Deliberately loud: the one
+   thing this screen must not do is leave somebody guessing why nothing works. */
+.suspend-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  margin: 16px 0 14px;
+  padding: 16px 16px 15px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+}
+.suspend-mark {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--danger);
+  color: #fff;
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1;
+}
+.suspend-banner strong {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--danger);
+}
+.suspend-banner span {
+  display: block;
+  margin-top: 7px;
+  font-size: 13.4px;
+  line-height: 1.6;
+  color: var(--text);
+}
+.suspend-note {
+  margin: 0 0 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--panel-3, var(--hover));
+  font-size: 13.4px;
+  line-height: 1.6;
+  color: var(--text);
+}
+.suspend-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+.suspend-actions .btn {
+  width: 100%;
+  justify-content: center;
+  padding: 11px 18px;
+}
+.suspend-sent {
+  margin: 0;
+  padding: 11px 12px;
+  border-radius: var(--radius);
+  font-size: 13.4px;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--brand-soft);
+  border: 1px solid color-mix(in srgb, var(--brand) 34%, transparent);
+}

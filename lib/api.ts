@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { UnauthorizedError } from './auth';
+import { SuspendedError, UnauthorizedError } from './auth';
 import { ensureSchema } from './migrate';
 
 export function ok(data: unknown, status = 200) {
@@ -35,6 +35,10 @@ export async function handle(fn: () => Promise<Response>): Promise<Response> {
     return await fn();
   } catch (err) {
     if (err instanceof UnauthorizedError) return bad('Not signed in', 401);
+    // Answered before the generic branches below, because the message would otherwise fall
+    // through to a 500 and read as a broken server rather than a deliberate lockout. The status
+    // and the wording are what let the client show the banner instead of an error toast.
+    if (err instanceof SuspendedError) return bad('This account is suspended', 403);
     const message = err instanceof Error ? err.message : 'Server error';
     console.error('[varnox]', message);
     if (schemaDrift(err)) {

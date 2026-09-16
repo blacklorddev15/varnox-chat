@@ -726,3 +726,28 @@ create index if not exists vx_sms_outbox_phone on vx_sms_outbox (to_phone, creat
 alter table vx_users
   add column if not exists deleted_at bigint;
 
+-- When an account was suspended, or null while it is in good standing.
+--
+-- Suspension is to deletion what a lockout is to a closed account: nothing is removed, the
+-- messages and the chats stay where they are, and clearing this column puts the account back
+-- exactly as it was. What it takes away is use of the app. The account can still sign in far
+-- enough to be shown why, which is the point — a silent sign-out looks like a broken app and
+-- leaves nowhere to ask for a review.
+--
+-- A timestamp rather than a boolean, so "when" is answerable later without another migration.
+--
+-- Keep the semicolon character out of these notes, for the same reason as the note above.
+alter table vx_users
+  add column if not exists suspended_at bigint;
+
+-- Why the account was suspended, shown to its owner on the banner. Optional — a suspension with
+-- no note recorded still works, it just explains less to the person it affects.
+alter table vx_users
+  add column if not exists suspend_reason text;
+
+-- When the suspended account last asked for a review, or null if it never has. Kept so the
+-- button can say the request was already sent rather than silently doing nothing again, and so
+-- the owner can see who is waiting on an answer.
+alter table vx_users
+  add column if not exists review_requested_at bigint;
+

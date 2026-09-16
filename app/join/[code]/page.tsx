@@ -1,16 +1,35 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { currentUser } from '@/lib/auth';
-import { getConv, getInvite } from '@/lib/db';
+import { getConv, getInvite, getSuspension } from '@/lib/db';
+import { ensureSchema } from '@/lib/migrate';
 import { refreshConv } from '@/lib/service';
+import { SuspendedScreen } from '@/components/suspended-screen';
 
 export const dynamic = 'force-dynamic';
 
 /** Invite links land here: sign in if needed, join the group, then open the app. */
 export default async function JoinPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
+
+  // Same reason as /chat: this page reads a suspension column and is not an API route, so nothing
+  // else would have reconciled the schema on a cold instance whose first request is this one.
+  await ensureSchema();
+
   const me = await currentUser();
   if (!me) redirect(`/login?next=${encodeURIComponent(`/join/${code}`)}`);
+
+  /**
+   * Checked before anything else, because this page is not just a view — it writes.
+   *
+   * Joining adds this account to the group's member list, which every other member then sees, so
+   * a suspended account must not reach that line. `requireUser()` refuses a suspended account,
+   * but this page is rendered from the session without going through it, so the gate has to be
+   * repeated here. Without it a suspended account could still pull an invite link, join the
+   * group, and only then be shown the banner — having already changed a roster other people read.
+   */
+  const suspension = await getSuspension(me.id);
+  if (suspension) return <SuspendedScreen suspension={suspension} />;
 
   const invite = await getInvite(code);
   if (!invite) {

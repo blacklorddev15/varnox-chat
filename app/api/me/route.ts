@@ -1,6 +1,13 @@
 import { currentUser, publicUser, requireUser } from '@/lib/auth';
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
-import { emailTaken, getUserByPhone, releasePhone, reservePhone, saveUser } from '@/lib/db';
+import {
+  emailTaken,
+  getSuspension,
+  getUserByPhone,
+  releasePhone,
+  reservePhone,
+  saveUser,
+} from '@/lib/db';
 import { normaliseEmail } from '@/lib/email';
 import { normalisePhone } from '@/lib/phone';
 
@@ -9,7 +16,11 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   return handle(async () => {
     const me = await currentUser();
-    return ok({ user: me ? publicUser(me) : null });
+    if (!me) return ok({ user: null, suspension: null });
+    // Returned beside the user rather than inside it. PublicUser is the shape that describes
+    // *other* people as well, and whether an account is suspended is nobody else's business —
+    // putting it in that projection would leak it through search, member lists and chat rows.
+    return ok({ user: publicUser(me), suspension: await getSuspension(me.id) });
   });
 }
 

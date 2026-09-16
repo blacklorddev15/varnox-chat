@@ -28,6 +28,25 @@ export type PublicUser = {
   lastSeen: number;
 };
 
+/**
+ * Why an account cannot use the app, and whether its owner has asked for that to be looked at.
+ *
+ * Separate from deletion on purpose. Deletion is the account leaving for good; suspension is a
+ * lockout that ends, and the account is expected back. Neither removes anything — the rows, the
+ * messages and the chats stay where they are in both cases.
+ *
+ * The account can still sign in far enough to be shown this, which is the point: a silent
+ * sign-out looks like a broken app and leaves nowhere to ask for a review.
+ */
+export type Suspension = {
+  /** When the suspension was applied. */
+  at: number;
+  /** The note recorded when suspending, shown to the suspended account. Null if none was left. */
+  reason: string | null;
+  /** When the account last asked for a review, or null if it never has. */
+  reviewRequestedAt: number | null;
+};
+
 export type ConvType = 'direct' | 'group';
 
 export type Conv = {

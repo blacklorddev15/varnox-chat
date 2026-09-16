@@ -410,6 +410,24 @@ export const STEPS: Step[] = [
     label: 'vx_users.deleted_at',
     sql: `alter table vx_users add column if not exists deleted_at bigint`,
   },
+  // Suspension lives beside deletion, and for the same reason: a nullable timestamp on the row
+  // rather than a table of its own. All three are additive, so a deploy that adds them and a
+  // deploy that ignores them can run against the same database without either noticing.
+  {
+    kind: 'column',
+    label: 'vx_users.suspended_at',
+    sql: `alter table vx_users add column if not exists suspended_at bigint`,
+  },
+  {
+    kind: 'column',
+    label: 'vx_users.suspend_reason',
+    sql: `alter table vx_users add column if not exists suspend_reason text`,
+  },
+  {
+    kind: 'column',
+    label: 'vx_users.review_requested_at',
+    sql: `alter table vx_users add column if not exists review_requested_at bigint`,
+  },
   {
     kind: 'index',
     label: 'vx_sms_outbox_phone',
