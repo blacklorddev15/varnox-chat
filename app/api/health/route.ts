@@ -14,9 +14,20 @@ export const dynamic = 'force-dynamic';
  * The missing-object names are safe to return publicly: this repository is public, so the
  * schema is not a secret. Nothing here exposes data or credentials.
  */
-const REQUIRED_TABLES = ['vx_users', 'vx_convs', 'vx_messages', 'vx_otp', 'vx_otp_rate'];
+const REQUIRED_TABLES = [
+  'vx_users',
+  'vx_convs',
+  'vx_messages',
+  'vx_media',
+  'vx_otp',
+  'vx_otp_rate',
+  'vx_msg_views',
+];
 const REQUIRED_COLUMNS: { table: string; column: string }[] = [
   { table: 'vx_users', column: 'email' },
+  { table: 'vx_media', column: 'once' },
+  { table: 'vx_messages', column: 'once' },
+  { table: 'vx_messages', column: 'payload' },
 ];
 
 export async function GET() {

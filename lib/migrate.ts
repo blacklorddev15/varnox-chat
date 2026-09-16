@@ -1,4 +1,4 @@
-import { pool } from './pg';
+import { q } from './pg';
 
 /**
  * Bring the database up to the shape this code needs — once per process.
@@ -11,145 +11,201 @@ import { pool } from './pg';
  * because signing in updates `last_seen`, while a wrong password returns early and looks
  * perfectly healthy.
  *
- * So the app now closes that gap itself: the statements below are the idempotent part of
- * db/schema.sql, and they run on the first request a process handles. Every one is
- * `if not exists`, so running them against a current database is a no-op. Set
- * AUTO_MIGRATE=0 to turn this off and manage the schema by hand.
+ * Set AUTO_MIGRATE=0 to turn this off and manage the schema by hand.
  *
- * What this deliberately does NOT do: data migrations, dropping anything, or rewriting
- * rows. Those stay in db/schema.sql, where a slow or surprising statement belongs, run
- * deliberately rather than behind a login request.
+ * TWO THINGS LEARNED THE HARD WAY, both fixed here:
+ *
+ * 1. No advisory lock. The connection string points at Neon's transaction-mode pooler,
+ *    which hands each query to whichever backend is free. A session-level lock taken by one
+ *    query can then be held by a backend that later serves other clients, and the matching
+ *    "unlock" can land on a different backend and do nothing at all. A lock that is taken
+ *    but never released hangs every later request that waits for it — which is exactly what
+ *    happened: the API answered in 0.3s, then hung past 60s, then recovered when that
+ *    backend was recycled, and would have hung again. A lock is the wrong tool here: every
+ *    statement is `if not exists` and duplicate-object errors are tolerated (see
+ *    alreadyDone), so no mutual exclusion is needed.
+ * 2. Nothing to do on a healthy database. The previous version ran all the DDL on every
+ *    cold start, which is pointless work inside the request path. Now one query asks what
+ *    is missing, and only that runs.
+ *
+ * What this deliberately does NOT do: data migrations, dropping anything, or rewriting rows.
+ * Those stay in db/schema.sql, where a slow or surprising statement belongs, run deliberately
+ * rather than behind a login request.
  */
 
-/** Statements are labelled so a failure names the object rather than a line number. */
-const STATEMENTS: [label: string, sql: string][] = [
-  ['vx_users.email', `alter table vx_users add column if not exists email text`],
-  [
-    'vx_users_email_unique',
-    `create unique index if not exists vx_users_email_unique
-       on vx_users (lower(email)) where email is not null`,
-  ],
-  [
-    'vx_otp',
-    `create table if not exists vx_otp (
-       phone       text primary key,
-       code_hash   text not null,
-       sent_at     bigint not null,
-       expires_at  bigint not null,
-       attempts    integer not null default 0,
-       consumed_at bigint,
-       sent_ip     text
-     )`,
-  ],
-  ['vx_otp_expires', `create index if not exists vx_otp_expires on vx_otp (expires_at)`],
-  [
-    'vx_otp_rate',
-    `create table if not exists vx_otp_rate (
-       bucket        text primary key,
-       count         integer not null default 0,
-       window_start  bigint not null,
-       blocked_until bigint not null default 0
-     )`,
-  ],
-  [
-    'vx_otp_rate_window',
-    `create index if not exists vx_otp_rate_window on vx_otp_rate (window_start)`,
-  ],
-  ['vx_media.once', `alter table vx_media add column if not exists once boolean not null default false`],
-  [
-    'vx_messages.once',
-    `alter table vx_messages add column if not exists once boolean not null default false`,
-  ],
-  [
-    'vx_messages.payload',
-    `alter table vx_messages add column if not exists payload jsonb`,
-  ],
-  [
-    'vx_msg_views',
-    `create table if not exists vx_msg_views (
-       message_id text not null,
-       user_id    text not null,
-       viewed_at  bigint not null,
-       primary key (message_id, user_id)
-     )`,
-  ],
+type Step = {
+  /** How the object is looked up, so only genuinely missing work is attempted. */
+  kind: 'column' | 'table' | 'index';
+  label: string;
+  sql: string;
+};
+
+const STEPS: Step[] = [
+  {
+    kind: 'column',
+    label: 'vx_users.email',
+    sql: `alter table vx_users add column if not exists email text`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_users_email_unique',
+    sql: `create unique index if not exists vx_users_email_unique
+            on vx_users (lower(email)) where email is not null`,
+  },
+  {
+    kind: 'table',
+    label: 'vx_otp',
+    sql: `create table if not exists vx_otp (
+            phone       text primary key,
+            code_hash   text not null,
+            sent_at     bigint not null,
+            expires_at  bigint not null,
+            attempts    integer not null default 0,
+            consumed_at bigint,
+            sent_ip     text
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_otp_expires',
+    sql: `create index if not exists vx_otp_expires on vx_otp (expires_at)`,
+  },
+  {
+    kind: 'table',
+    label: 'vx_otp_rate',
+    sql: `create table if not exists vx_otp_rate (
+            bucket        text primary key,
+            count         integer not null default 0,
+            window_start  bigint not null,
+            blocked_until bigint not null default 0
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_otp_rate_window',
+    sql: `create index if not exists vx_otp_rate_window on vx_otp_rate (window_start)`,
+  },
+  {
+    kind: 'column',
+    label: 'vx_media.once',
+    sql: `alter table vx_media add column if not exists once boolean not null default false`,
+  },
+  {
+    kind: 'column',
+    label: 'vx_messages.once',
+    sql: `alter table vx_messages add column if not exists once boolean not null default false`,
+  },
+  {
+    kind: 'column',
+    label: 'vx_messages.payload',
+    sql: `alter table vx_messages add column if not exists payload jsonb`,
+  },
+  {
+    kind: 'table',
+    label: 'vx_msg_views',
+    sql: `create table if not exists vx_msg_views (
+            message_id text not null,
+            user_id    text not null,
+            viewed_at  bigint not null,
+            primary key (message_id, user_id)
+          )`,
+  },
 ];
 
-/** Any value, as long as every instance of this app uses the same one. */
-const LOCK_KEY = 727001;
+/** A request waits this long for reconciliation, then carries on without it. */
+const SCHEMA_WAIT_MS = 4000;
 
 export type MigrationReport = { ran: boolean; applied: string[]; failed: string | null };
 
 let started: Promise<MigrationReport> | null = null;
 
 /**
- * Runs at most once per process. Failures are not cached, so a transient problem gets
- * another chance on a later request instead of poisoning the instance forever.
+ * Runs at most once per process, and never holds a request longer than SCHEMA_WAIT_MS.
+ * A failure is not cached, so a transient problem gets another chance on a later request.
  */
 export function ensureSchema(): Promise<MigrationReport> {
   if (process.env.AUTO_MIGRATE === '0') {
     return Promise.resolve({ ran: false, applied: [], failed: null });
   }
   if (!started) started = run();
-  return started;
+
+  const work = started;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      console.warn(
+        `[varnox] schema reconciliation still running after ${SCHEMA_WAIT_MS}ms — serving anyway`
+      );
+      // Let a later request try again rather than caching a stalled attempt forever.
+      if (started === work) started = null;
+      resolve({ ran: false, applied: [], failed: 'timed out' });
+    }, SCHEMA_WAIT_MS);
+    work.then((report) => {
+      clearTimeout(timer);
+      resolve(report);
+    });
+  });
 }
 
 /**
  * Errors that mean "someone already did this", which is a success for our purposes:
- * 42P07 duplicate_table, 42710 duplicate_object.
+ * 42P07 duplicate_table, 42710 duplicate_object. Concurrent cold starts can race the same
+ * statement, and `if not exists` does not make every one of them atomic.
  */
 function alreadyDone(err: unknown): boolean {
   const code = (err as { code?: string } | null)?.code;
   return code === '42P07' || code === '42710';
 }
 
+/** Everything that exists, in one round trip, so a healthy database costs one SELECT. */
+async function existing(): Promise<Set<string>> {
+  const rows = await q<{ kind: string; name: string }>(
+    `select 'table' as kind, table_name as name from information_schema.tables
+       where table_schema = 'public'
+     union all
+     select 'column', table_name || '.' || column_name from information_schema.columns
+       where table_schema = 'public'
+     union all
+     select 'index', indexname from pg_indexes where schemaname = 'public'`
+  );
+  return new Set(rows.map((r) => `${r.kind}:${r.name}`));
+}
+
 async function run(): Promise<MigrationReport> {
   const applied: string[] = [];
-  let client;
+
+  let present: Set<string>;
   try {
-    client = await pool().connect();
+    present = await existing();
   } catch (err) {
     // No database at all: leave it to the individual request to report its own failure.
     const message = err instanceof Error ? err.message : String(err);
-    console.error('[varnox] auto-migration could not connect:', message);
+    console.error('[varnox] schema reconciliation could not read the schema:', message);
     started = null;
     return { ran: false, applied, failed: message };
   }
 
-  try {
-    // One client for the whole sequence, so the advisory lock is held on the same session
-    // that does the work — with a pool, lock and unlock could otherwise land on different
-    // connections. Two cold starts racing the same DDL is how you get a catalogue error.
-    await client.query('select pg_advisory_lock($1)', [LOCK_KEY]);
+  const missing = STEPS.filter((s) => !present.has(`${s.kind}:${s.label}`));
+  if (!missing.length) return { ran: true, applied, failed: null };
+
+  for (const step of missing) {
     try {
-      for (const [label, sql] of STATEMENTS) {
-        try {
-          await client.query(sql);
-          applied.push(label);
-        } catch (err) {
-          if (alreadyDone(err)) continue;
-          throw err;
-        }
+      await q(step.sql);
+      applied.push(step.label);
+    } catch (err) {
+      if (alreadyDone(err)) continue;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[varnox] schema reconciliation failed at ${step.label}: ${message}`);
+      const code = (err as { code?: string } | null)?.code;
+      if (code === '23505') {
+        console.error('[varnox]   duplicate values exist, so a unique index cannot be built');
+      } else if (/permission denied/i.test(message)) {
+        console.error('[varnox]   the database role may not be allowed to change the schema');
       }
-    } finally {
-      await client.query('select pg_advisory_unlock($1)', [LOCK_KEY]);
+      started = null;
+      return { ran: false, applied, failed: message };
     }
-    if (applied.length) console.log('[varnox] auto-migration applied:', applied.join(', '));
-    return { ran: true, applied, failed: null };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error('[varnox] auto-migration failed:', message);
-    // Most likely causes, named so the log is actionable rather than cryptic.
-    if ((err as { code?: string } | null)?.code === '42P07') {
-      console.error('[varnox]   a table already exists with a different shape');
-    } else if ((err as { code?: string } | null)?.code === '23505') {
-      console.error('[varnox]   duplicate values exist, so the unique index cannot be built');
-    } else if (/permission denied/i.test(message)) {
-      console.error('[varnox]   the database role may not be allowed to change the schema');
-    }
-    started = null;
-    return { ran: false, applied, failed: message };
-  } finally {
-    client.release();
   }
+
+  console.log('[varnox] schema reconciliation applied:', applied.join(', '));
+  return { ran: true, applied, failed: null };
 }
