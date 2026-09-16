@@ -14,7 +14,27 @@ export const dynamic = 'force-dynamic';
  *
  * Soft: the row stays and messages stay in the threads they were sent to. They are not only
  * this account's to remove, and erasing them would reach into everybody else's copy of the
- * conversation. What goes away is the ability to sign in and any appearance in search.
+ * conversation.
+ *
+ * What goes away, then, is decided at the places that read the row rather than here — this route
+ * only writes the flag:
+ *
+ *   signing in      currentUser() refuses a deleted account, so every route behind it closes
+ *   search          searchUsers filters on deleted_at
+ *   the directory   listUsers filters on deleted_at, which it previously did not — the panel
+ *                   opens on that list, so clearing the search box brought the account back
+ *   group rosters   presentMember keeps the profile, so buildChatRow drops a deleted account
+ *                   from a group's members, count and admins rather than leaving a name there
+ *                   that resolves to nobody
+ *   new contact     POST /api/chats refuses a direct chat with a deleted account by name, and
+ *                   neither creating nor extending a group will accept one
+ *   sending         a one-to-one thread that already exists stays readable, but POST to its
+ *                   messages refuses with the same words — otherwise opening an existing thread
+ *                   would be the way around the check above
+ *   people lists    the updates feed, the viewers of an update, and a channel's followers
+ *
+ * A one-to-one thread itself is left alone and still shows the other person's name: the history
+ * is theirs too, and relabelling the conversation "Chat" would hide which one it is.
  */
 type Body = { username?: string };
 

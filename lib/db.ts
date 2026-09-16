@@ -243,11 +243,7 @@ export async function searchUsers(term: string, excludeId: string): Promise<Publ
   // A deleted account is not shown again, however it was found — by handle, by name, or by
   // whatever mixture the queries above turn up. One rule here rather than a condition inside
   // each query, where two of them could disagree.
-  const alive = await q<{ id: string }>(
-    `select id from vx_users where id = any($1::text[]) and deleted_at is null`,
-    [ids.slice(0, 12)]
-  );
-  const live = new Set(alive.map((r) => r.id));
+  const live = await liveUserIds(ids.slice(0, 12));
 
   return users
     .filter((u): u is User => Boolean(u))
@@ -262,10 +258,18 @@ export async function searchUsers(term: string, excludeId: string): Promise<Publ
  * without it the app looks empty even when other people have signed up — which is exactly
  * the complaint that prompted it. Deliberately capped: an unbounded list would be a user
  * dump with a search box in front of it.
+ *
+ * A deleted account is excluded, and the condition belongs in this query rather than in getUser.
+ * It used to be missing here while searchUsers had it, so a deleted account disappeared once you
+ * typed and came back the moment you cleared the box — and an empty box is the state the panel
+ * opens in, so the one screen a person sees first was the one that still listed them.
  */
 export async function listUsers(excludeId: string, limit = 50): Promise<PublicUser[]> {
   const rows = await q<{ id: string }>(
-    'select id from vx_users where id <> $1 order by last_seen desc limit $2',
+    `select id from vx_users
+      where id <> $1 and deleted_at is null
+      order by last_seen desc
+      limit $2`,
     [excludeId, limit]
   );
   const users = await Promise.all(rows.map((r) => getUser(r.id)));
@@ -1679,8 +1683,15 @@ export async function listStatusFeed(viewerId: string): Promise<StatusAuthor[]> 
   }
 
   const authors: StatusAuthor[] = [];
+  // The same rule as the directory, a group roster and a follower list: a deleted account is not
+  // named again, here as an author. Asked once for the whole feed rather than once per author.
+  // The viewer's own group is exempt — a row it does not resolve is not a status to show, and
+  // the filter is about other people.
+  const live = await liveUserIds([...grouped.keys()].filter((id) => id !== viewerId));
+
   for (const [authorId, items] of grouped) {
     const isSelf = authorId === viewerId;
+    if (!isSelf && !live.has(authorId)) continue;
     const settings = await getSettings(authorId);
     if (!isSelf && settings.privacy.statusPrivacy === 'chats') {
       const peers = await directPeerIds(authorId);
@@ -1744,8 +1755,12 @@ export async function listStatusViewers(
   );
 
   const viewers: StatusViewer[] = [];
+  // The same rule the directory and a group roster apply: an account that has been deleted is
+  // not named again. Asked once for the whole list rather than once per viewer.
+  const live = await liveUserIds(rows.map((r) => r.viewer_id));
   for (const row of rows) {
     if (row.viewer_id === ownerId) continue;
+    if (!live.has(row.viewer_id)) continue;
     const user = await getUser(row.viewer_id);
     if (!user) continue;
     const settings = await getSettings(row.viewer_id);
@@ -2143,7 +2158,11 @@ export async function getChannelFollowers(
   );
 
   const followers: ChannelFollower[] = [];
+  // Same rule again — a follower list is a list of people, and a deleted account is not named
+  // in one. Asked once for the whole list rather than once per follower.
+  const live = await liveUserIds(rows.map((r) => r.user_id));
   for (const row of rows) {
+    if (!live.has(row.user_id)) continue;
     const user = await getUser(row.user_id);
     if (!user) continue;
     const settings = await getSettings(row.user_id);
@@ -3281,6 +3300,30 @@ export async function isAccountDeleted(userId: string): Promise<boolean> {
     [userId]
   );
   return rows[0]?.deleted_at != null;
+}
+
+/**
+ * The subset of `ids` that has not been deleted.
+ *
+ * The list form of the question above, and one query for the whole set rather than one per id —
+ * callers ask about a member list, not about a person.
+ *
+ * This exists so the rule has a single home. It was previously written inline in searchUsers and
+ * omitted from listUsers, and the omission was invisible: typed searches hid a deleted account
+ * while the directory the panel opens on kept showing it, which reads as the deletion having
+ * half-worked. Callers that need "who is gone" take the complement.
+ *
+ * An unknown id is not returned, so a caller using this as a filter also drops ids that never
+ * existed — which is the behaviour a member list wants.
+ */
+export async function liveUserIds(ids: string[]): Promise<Set<string>> {
+  const wanted = Array.from(new Set(ids.filter(Boolean)));
+  if (wanted.length === 0) return new Set();
+  const rows = await q<{ id: string }>(
+    `select id from vx_users where id = any($1::text[]) and deleted_at is null`,
+    [wanted]
+  );
+  return new Set(rows.map((r) => r.id));
 }
 
 /**
