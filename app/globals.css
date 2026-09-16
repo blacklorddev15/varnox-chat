@@ -1,16 +1,29 @@
 /* ==========================================================================
    Varnox design system — messenger look and feel, Varnox's own branding.
 
-   Palette note: the greens below are Varnox's own values chosen for the same
-   familiar feel (teal header, pale-green outgoing bubbles, blue read ticks).
-   No third-party logo, name or artwork is used anywhere in this app.
+   Palette note: a dark, warm scheme — near-black browns for surfaces, one gold
+   for everything that carries emphasis, and a bright gold for read ticks. Warm
+   neutrals rather than grey ones, because a cool grey beside gold reads as dirty
+   and the two never quite settle together.
+
+   Read ticks are brighter than the brand gold on purpose: the two ticks must tell
+   apart at a glance on a small screen, and a hue difference is quicker to see than
+   a lightness difference. Delivered ticks stay the muted neutral.
+
+   No third-party logo, name or artwork is used anywhere in this app. The backdrop
+   photograph is the operator's own file, served from /fire-bg.jpg.
    ========================================================================== */
 
 :root {
-  --brand: #12a87e;
-  --brand-strong: #0e8f6b;
-  --brand-soft: rgba(18, 168, 126, 0.14);
-  --tick-read: #53bdeb;
+  --brand: #e6b84a;
+  --brand-strong: #c99a2e;
+  --brand-soft: rgba(230, 184, 74, 0.16);
+  /* Ink for anything filled with the brand gold — badges, the send button, primary
+     buttons, the floating action button. White on this gold measures 1.8:1, which is
+     unreadable, so every gold fill takes this dark brown instead. It is deliberately
+     not a theme token: the gold is the same in both themes, so its ink is too. */
+  --on-brand: #1a1408;
+  --tick-read: #ffd166;
   --danger: #f15c6d;
   --radius: 8px;
   --sidebar-w: 30%;
@@ -21,49 +34,58 @@
 }
 
 html[data-theme='light'] {
-  --app-bg: #d9dbd4;
-  --panel: #ffffff;
-  --panel-2: #f0f2f5;
-  --panel-3: #f0f2f5;
-  --panel-4: #e9edef;
-  --line: rgba(11, 20, 26, 0.1);
-  --line-strong: rgba(11, 20, 26, 0.18);
-  --text: #111b21;
-  --muted: #667781;
-  --header: #0e6b57;
-  --header-text: #eaf6f2;
-  --header-muted: #bfded5;
+  --app-bg: #ece2cd;
+  --panel: #fffdf8;
+  --panel-2: #f7f0e1;
+  --panel-3: #f7f0e1;
+  --panel-4: #efe6d1;
+  --line: rgba(84, 63, 22, 0.14);
+  --line-strong: rgba(84, 63, 22, 0.24);
+  --text: #241c0c;
+  --muted: #7d6a48;
+  --header: #2b2110;
+  --header-text: #f8e6b4;
+  --header-muted: #cdb582;
   --bubble-in: #ffffff;
-  --bubble-out: #dcf6d3;
-  --chat-bg: #efeae2;
-  --doodle: #b8ab99;
-  --hover: rgba(11, 20, 26, 0.055);
-  --shadow: 0 1px 1px rgba(11, 20, 26, 0.16);
-  --shadow-lg: 0 12px 32px rgba(11, 20, 26, 0.22);
-  --badge-text: #ffffff;
+  --bubble-out: #fbeecb;
+  --chat-bg: #f6efe0;
+  --doodle: #c6b087;
+  /* A deeper gold than the brand, so a link stays legible on the pale outgoing
+     bubble instead of glowing out of it. */
+  --link: #8a6410;
+  --hover: rgba(84, 63, 22, 0.06);
+  --shadow: 0 1px 1px rgba(84, 63, 22, 0.18);
+  --shadow-lg: 0 12px 32px rgba(84, 63, 22, 0.24);
+  --badge-text: var(--on-brand);
+  /* Bright gold is invisible against the pale outgoing bubble in this theme — 1.25:1 — so
+     the read tick darkens to the same gold used for links here. The dark theme keeps the
+     bright one. */
+  --tick-read: #8a6410;
 }
 
 html[data-theme='dark'] {
-  --app-bg: #070d11;
-  --panel: #111b21;
-  --panel-2: #202c33;
-  --panel-3: #202c33;
-  --panel-4: #2a3942;
-  --line: rgba(233, 237, 239, 0.09);
-  --line-strong: rgba(233, 237, 239, 0.18);
-  --text: #e9edef;
-  --muted: #8696a0;
-  --header: #202c33;
-  --header-text: #e9edef;
-  --header-muted: #8696a0;
-  --bubble-in: #202c33;
-  --bubble-out: #0e4a3d;
-  --chat-bg: #0b141a;
-  --doodle: #4a565c;
-  --hover: rgba(233, 237, 239, 0.06);
-  --shadow: 0 1px 1px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.55);
-  --badge-text: #0b141a;
+  --app-bg: #0a0805;
+  --panel: #14110b;
+  --panel-2: #1d1810;
+  --panel-3: #1d1810;
+  --panel-4: #292216;
+  --line: rgba(230, 184, 74, 0.16);
+  --line-strong: rgba(230, 184, 74, 0.32);
+  --text: #f4e8cf;
+  --muted: #a5906a;
+  --header: #1a1509;
+  --header-text: #f6d98a;
+  --header-muted: #b99f66;
+  --bubble-in: #1d1810;
+  --bubble-out: #3b2f12;
+  --chat-bg: #0b0906;
+  --doodle: #6b5626;
+  --link: #f0c75e;
+  --hover: rgba(230, 184, 74, 0.08);
+  --shadow: 0 1px 1px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+  --badge-text: var(--on-brand);
+  --tick-read: #ffd166;
 }
 
 * {
@@ -311,7 +333,7 @@ html[data-theme='dark'] .list-label {
   background: var(--panel-4);
 }
 html[data-theme='dark'] .chat-item.active {
-  background: #2a3942;
+  background: var(--panel-4);
 }
 
 .chat-item-body {
@@ -375,17 +397,15 @@ html[data-theme='dark'] .chat-item-time.unread {
   padding: 0 6px;
   border-radius: 10px;
   background: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
   font-size: 11.6px;
   font-weight: 700;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
-html[data-theme='dark'] .badge {
-  background: #12a87e;
-  color: #0b141a;
-}
+/* The per-theme override that used to live here is gone: the fill and its ink are now the
+   same in both themes, so a second rule would only have restated the first. */
 
 .mini-icon {
   display: inline-flex;
@@ -401,7 +421,7 @@ html[data-theme='dark'] .badge {
   height: 54px;
   border-radius: 50%;
   background: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -560,8 +580,8 @@ html[data-theme='dark'] .chat-pane[data-wall='leaf'] .chat-bg-pattern {
 }
 html[data-theme='dark'] .day-chip,
 html[data-theme='dark'] .sys-chip {
-  background: #182229;
-  color: #8696a0;
+  background: var(--panel-3);
+  color: var(--muted);
 }
 
 .msg-row {
@@ -618,7 +638,7 @@ html[data-theme='dark'] .sys-chip {
   background: var(--bubble-out);
 }
 html[data-theme='light'] .bubble.tail-out {
-  color: #111b21;
+  color: var(--text);
 }
 .bubble.media {
   padding: 4px 4px 5px;
@@ -634,11 +654,11 @@ html[data-theme='light'] .bubble.tail-out {
   line-height: 1.35;
 }
 .bubble .text a {
-  color: #027eb5;
+  color: var(--link);
   text-decoration: underline;
 }
 html[data-theme='dark'] .bubble .text a {
-  color: #53bdeb;
+  color: var(--link);
 }
 .bubble .meta {
   display: inline-flex;
@@ -826,7 +846,7 @@ html[data-theme='dark'] .bubble .reply b {
   height: 34px;
   border-radius: 50%;
   background: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -992,7 +1012,7 @@ html[data-theme='light'] .composer {
   padding: 8px 12px;
 }
 html[data-theme='dark'] .composer .field {
-  background: #2a3942;
+  background: var(--panel-4);
 }
 .composer textarea {
   flex: 1;
@@ -1011,7 +1031,7 @@ html[data-theme='dark'] .composer .field {
   height: 44px;
   border-radius: 50%;
   background: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1148,7 +1168,7 @@ html[data-theme='dark'] .attach-ic {
   padding-left: 8px;
 }
 html[data-theme='dark'] .sel-bar {
-  background: #202c33;
+  background: var(--panel-2);
 }
 
 /* ---------------------------------------------------------------- emoji */
@@ -1296,7 +1316,7 @@ html[data-theme='dark'] .empty {
   padding: 9px 18px;
   border-radius: 20px;
   background: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
   font-weight: 500;
   font-size: 14px;
 }
@@ -1593,7 +1613,7 @@ html[data-theme='dark'] .settings-group .label {
 }
 .seg.on {
   background: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
 }
 
 .wall-grid {
@@ -1733,8 +1753,8 @@ html[data-theme='dark'] .search-hit b {
   place-items: center;
   padding: 24px;
   background:
-    radial-gradient(820px 420px at 8% -12%, rgba(18, 168, 126, 0.25), transparent 62%),
-    radial-gradient(760px 420px at 96% 110%, rgba(14, 143, 107, 0.22), transparent 60%),
+    radial-gradient(820px 420px at 8% -12%, rgba(230, 184, 74, 0.22), transparent 62%),
+    radial-gradient(760px 420px at 96% 110%, rgba(201, 154, 46, 0.20), transparent 60%),
     var(--app-bg);
 }
 .auth-card {
@@ -2057,7 +2077,7 @@ html[data-theme='dark'] .switch-line button {
   border-radius: 50%;
   border: 2px solid var(--panel);
   background: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
   font-size: 15px;
   line-height: 17px;
   text-align: center;
@@ -2074,7 +2094,10 @@ html[data-theme='dark'] .switch-line button {
   color: #f2f5f7;
 }
 .status-compose.photo {
-  background: #0b141a;
+  /* Deliberately a fixed near-black rather than a theme token: this surface carries
+     near-white text and is always dark, so following the theme would put white text
+     on the light theme's cream. */
+  background: #0b0906;
 }
 
 .sc-head {
@@ -2590,7 +2613,7 @@ html[data-theme='light'] .ch-post {
   height: 42px;
   border-radius: 50%;
   background: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
 }
 .ch-send:disabled {
   opacity: 0.45;
@@ -2670,7 +2693,7 @@ html[data-theme='dark'] .call-dir {
   z-index: 80;
   display: flex;
   flex-direction: column;
-  background: #0b141a;
+  background: #0b0906;
   color: #f2f5f7;
   animation: fade 0.14s ease-out;
 }
@@ -2720,7 +2743,10 @@ html[data-theme='dark'] .call-dir {
   color: #fff;
 }
 .call-btn.accept > svg {
-  background: #12a87e;
+  background: var(--brand);
+  /* Dark glyph on the gold fill. The white glyph this inherits is fine on the red
+     decline button but unreadable on gold. */
+  color: var(--badge-text);
 }
 .call-btn.decline > svg {
   background: var(--danger);
@@ -2768,7 +2794,7 @@ html[data-theme='dark'] .call-dir {
 /* A voice call has no picture to show: the element stays in the tree — it is what plays the
    other person — but it is reduced to nothing so the avatar can take the stage. */
 .call-stage.voice {
-  background: #0b141a;
+  background: #0b0906;
 }
 .call-stage.voice .call-remote {
   inset: auto;
@@ -2792,7 +2818,7 @@ html[data-theme='dark'] .call-dir {
   overflow: hidden;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.28);
-  background: #111b21;
+  background: #14110b;
   box-shadow: var(--shadow-lg);
   transition: all 0.16s ease-out;
 }
@@ -2831,7 +2857,7 @@ html[data-theme='dark'] .call-dir {
   justify-content: center;
   gap: 18px;
   padding: 16px 16px calc(20px + env(safe-area-inset-bottom, 0px));
-  background: #0b141a;
+  background: #0b0906;
 }
 .call-ctl {
   display: flex;
@@ -2851,8 +2877,8 @@ html[data-theme='dark'] .call-dir {
   color: #fff;
 }
 .call-ctl.on > svg {
-  background: #fff;
-  color: #111b21;
+  background: var(--brand);
+  color: var(--badge-text);
 }
 .call-ctl.end > svg {
   background: var(--danger);
@@ -2860,4 +2886,57 @@ html[data-theme='dark'] .call-dir {
 }
 .call-ctl:disabled {
   opacity: 0.5;
+}
+
+
+/* ==========================================================================
+   The gold backdrop
+
+   The photograph sits under a scrim rather than being used raw. Message text is
+   drawn straight onto this surface, and a bright flame behind a line of 14px text
+   is unreadable however good the picture is — so the picture is felt rather than
+   read, and the scrim is what buys the contrast back.
+
+   Two scrims, because the two surfaces carry different things. The shell is mostly
+   covered by panels, so it can stay lighter, while the chat canvas holds the text
+   and needs more. The chat scrim is a slight vertical gradient so the middle of the
+   pane — where the flames are brightest — is dimmed most.
+
+   Dark theme only. A black photograph under the light theme's cream surfaces would
+   fight every other colour in it, so the light theme keeps its warm paper ground and
+   takes only the gold. To give the light theme the photograph too, move these rules
+   out of the [data-theme='dark'] scope and raise the scrim towards white.
+
+   No background-attachment: fixed. It is unreliable on iOS Safari, where it is
+   treated as scroll and can jitter while a phone scrolls a message list.
+   ========================================================================== */
+:root {
+  --fire-scrim-app: linear-gradient(rgba(9, 7, 4, 0.84), rgba(9, 7, 4, 0.84));
+  --fire-scrim-chat: linear-gradient(
+    180deg,
+    rgba(9, 7, 4, 0.9) 0%,
+    rgba(9, 7, 4, 0.78) 38%,
+    rgba(9, 7, 4, 0.92) 100%
+  );
+}
+
+html[data-theme='dark'] body {
+  background-image: var(--fire-scrim-app), url('/fire-bg.jpg');
+  background-size: cover, cover;
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
+}
+
+html[data-theme='dark'] .chat-pane {
+  background-image: var(--fire-scrim-chat), url('/fire-bg.jpg');
+  background-size: cover, cover;
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
+}
+
+/* The doodle was drawn for a flat ground and only adds noise over a photograph, so it
+   fades to a hint. The wallpaper choices below still win where one is selected — their
+   selectors are more specific than this — so dots, grid and leaf keep working. */
+html[data-theme='dark'] .chat-bg-pattern {
+  opacity: 0.07;
 }

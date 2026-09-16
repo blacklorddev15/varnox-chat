@@ -1,7 +1,13 @@
 /* Varnox service worker — offline shell only.
    API responses and Blob media are never cached, so the app can never show stale chats. */
-const CACHE = 'varnox-shell-v1';
-const SHELL = ['/', '/login', '/icon.svg', '/manifest.webmanifest'];
+/* The version is bumped whenever the shell changes shape, because activate() deletes every
+   cache whose name does not match — that is what makes a change to the shell actually reach
+   a browser that already has the old one. */
+const CACHE = 'varnox-shell-v2';
+/* The backdrop is part of the shell rather than chat content: nothing else would ever cache
+   it, since it is neither a navigation nor under /_next/static, so offline it would simply
+   vanish and leave the flat fallback colour behind the messages. */
+const SHELL = ['/', '/login', '/icon.svg', '/manifest.webmanifest', '/fire-bg.jpg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

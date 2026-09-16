@@ -25,8 +25,10 @@ export const viewport: Viewport = {
   maximumScale: 1,
   viewportFit: 'cover',
   themeColor: [
-    { media: '(prefers-color-scheme: dark)', color: '#070b14' },
-    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    // Matches --app-bg in each theme, so the status bar blends into the app surface
+    // instead of drawing a band of a colour the app no longer uses.
+    { media: '(prefers-color-scheme: dark)', color: '#0a0805' },
+    { media: '(prefers-color-scheme: light)', color: '#fffdf8' },
   ],
 };
 
