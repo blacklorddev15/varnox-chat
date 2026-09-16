@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, del, post, uploadImage } from '@/lib/client';
-import type { ChatRow, Device, PublicUser } from '@/lib/types';
-import { presence } from '@/lib/format';
+import type { ChatRow, Device, PublicUser, WhatsAppPairing, WhatsAppSession } from '@/lib/types';
+import { presence, relativeTime } from '@/lib/format';
 import { formatPhone } from '@/lib/phone';
 import { Avatar } from './avatar';
 import { MediaGallery } from './overlays';
@@ -802,6 +802,286 @@ export function ChatInfoPanel({
           {isGroup ? 'Leave group' : 'Delete chat'}
         </button>
       </div>
+    </Sheet>
+  );
+}
+
+/* ── linking a whatsapp number ─────────────────────────────────────────── */
+
+/**
+ * The bot's pairing states, said in words the person reading the screen understands. A state
+ * this app has not heard of is shown exactly as the bot wrote it rather than mapped to
+ * something wrong, so a bot that grows a new step does not blank the screen.
+ */
+function pairingStatusLabel(status: string): string {
+  if (status === 'pending') return 'Waiting for the bot to pick this up…';
+  if (status === 'processing') return 'The bot is preparing your code…';
+  if (status === 'code_generated') return 'Enter this code in WhatsApp';
+  if (status === 'connected') return 'Linked';
+  if (status === 'failed') return 'Pairing failed';
+  if (status === 'expired') return 'This request expired';
+  return status;
+}
+
+/** The same, for a linked session — 'disconnected' is what the bot writes once it is gone. */
+function sessionStatusLabel(status: string): string {
+  if (status === 'connected') return 'Connected';
+  if (status === 'disconnected') return 'Disconnected';
+  return status || 'Unknown';
+}
+
+/**
+ * The "Link WhatsApp" sheet.
+ *
+ * Step one takes a number and asks the external bot for a code. Step two shows what the bot
+ * wrote while the screen polls for the transition to 'connected', and the number then moves
+ * into the list below. Every string that comes from the bot — the code, an error — is rendered
+ * as text, never as markup.
+ */
+export function WhatsAppLinkPanel({ onClose }: { onClose: () => void }) {
+  const [sessions, setSessions] = useState<WhatsAppSession[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [phone, setPhone] = useState('');
+  const [step, setStep] = useState<'phone' | 'code'>('phone');
+  const [pairing, setPairing] = useState<WhatsAppPairing | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const res = await api<{ sessions: WhatsAppSession[] }>('/api/whatsapp/sessions');
+      setSessions(res.sessions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load your linked numbers');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const pairingId = pairing?.id ?? null;
+  const secondsLeft = pairing ? Math.max(0, Math.ceil((pairing.expiresAt - now) / 1000)) : 0;
+  const terminal = pairing?.status === 'connected' || pairing?.status === 'failed';
+  const expired = Boolean(pairing && (pairing.status === 'expired' || pairing.expiresAt <= now));
+
+  /**
+   * One tick a second while the code step is open. It drives the countdown, and every other
+   * tick it asks the server what the bot has written.
+   *
+   * The effect drops out — and so clears its interval — on unmount, on success, on failure and
+   * on expiry, because each of those makes one of its conditions false. `now` is deliberately
+   * not a dependency: only the boolean `expired` is, so the interval is not torn down and
+   * restarted on every second that passes.
+   */
+  useEffect(() => {
+    if (step !== 'code' || pairingId === null || terminal || expired) return;
+    let lastPoll = 0;
+    const tick = async () => {
+      const at = Date.now();
+      setNow(at);
+      if (at - lastPoll < 2000) return;
+      lastPoll = at;
+      try {
+        const res = await api<{ pairing: WhatsAppPairing }>(`/api/whatsapp/pair/${pairingId}`);
+        setPairing(res.pairing);
+      } catch {
+        // A dropped poll is not a failed pairing: keep the last known state and ask again.
+      }
+    };
+    const id = window.setInterval(() => void tick(), 1000);
+    return () => window.clearInterval(id);
+  }, [step, pairingId, terminal, expired]);
+
+  // Reaching 'connected' is the one moment the number moves into the list, and the one moment
+  // a fresh status can be shown without racing the next poll.
+  useEffect(() => {
+    if (pairing?.status !== 'connected') return;
+    setNotice(`${formatPhone(pairing.phone) || pairing.phone} is linked.`);
+    void load();
+  }, [pairing?.status, pairing?.phone, load]);
+
+  function backToPhone() {
+    setStep('phone');
+    setPairing(null);
+    setError('');
+  }
+
+  async function requestCode() {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const res = await post<{ pairing: WhatsAppPairing }>('/api/whatsapp/pair', { phone });
+      setPairing(res.pairing);
+      setNow(Date.now());
+      setStep('code');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start pairing');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function forget(session: WhatsAppSession) {
+    setBusy(true);
+    setError('');
+    try {
+      await del(`/api/whatsapp/sessions/${encodeURIComponent(session.id)}`);
+      setSessions((prev) => prev.filter((s) => s.id !== session.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not forget that number');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const minutes = String(Math.floor(secondsLeft / 60));
+  const seconds = String(secondsLeft % 60).padStart(2, '0');
+
+  return (
+    <Sheet title="Link WhatsApp" onClose={onClose}>
+      <p className="hint" style={{ marginBottom: 14 }}>
+        Linking makes this WhatsApp number answer from the machine running the bot. Use a number
+        you are willing to keep for that — it is separate from the number you sign in with here.
+      </p>
+
+      {step === 'phone' ? (
+        <div className="field-row">
+          <label htmlFor="whatsapp-phone">WhatsApp number</label>
+          <input
+            id="whatsapp-phone"
+            className="input"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="+65 9123 4567"
+            inputMode="tel"
+            autoComplete="tel"
+          />
+          <p className="hint" style={{ marginTop: 6 }}>
+            Include the country code. A pairing code will be generated for this number.
+          </p>
+          <button
+            type="button"
+            className="btn"
+            style={{ marginTop: 10 }}
+            disabled={busy || !phone.trim()}
+            onClick={() => void requestCode()}
+          >
+            {busy ? 'Requesting…' : 'Generate pairing code'}
+          </button>
+        </div>
+      ) : (
+        <div className="field-row">
+          {pairing?.status === 'connected' ? (
+            <p className="hint">
+              {pairingStatusLabel(pairing.status)}. The number is in your list below.
+            </p>
+          ) : pairing?.status === 'failed' ? (
+            <>
+              {/* Whatever the bot wrote is shown as text; it is never rendered as markup. */}
+              <p className="error">{pairing.error || 'The bot could not pair that number.'}</p>
+              <button type="button" className="btn" style={{ marginTop: 10 }} onClick={backToPhone}>
+                Try again
+              </button>
+            </>
+          ) : expired ? (
+            <>
+              <p className="hint">
+                This request expired before it was connected. Ask for a new code.
+              </p>
+              <button type="button" className="btn" style={{ marginTop: 10 }} onClick={backToPhone}>
+                Try again
+              </button>
+            </>
+          ) : pairing?.status === 'code_generated' && pairing.code ? (
+            <>
+              <div style={{ textAlign: 'center', margin: '2px 0 12px' }}>
+                <div style={{ fontSize: 34, fontWeight: 600, letterSpacing: 6 }}>
+                  {pairing.code}
+                </div>
+                <p className="hint">
+                  {secondsLeft > 0
+                    ? `Expires in ${minutes}:${seconds}`
+                    : 'That code has expired.'}
+                </p>
+              </div>
+              <p className="hint">
+                Open WhatsApp on your phone, open Linked devices, then choose Link with a phone
+                number and enter the code above.
+              </p>
+              <button
+                type="button"
+                className="btn ghost"
+                style={{ marginTop: 10 }}
+                onClick={backToPhone}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="hint">{pairingStatusLabel(pairing?.status ?? '')}</p>
+              <p className="hint">
+                {secondsLeft > 0
+                  ? `The code is good for five minutes once it arrives. Expires in ${minutes}:${seconds}.`
+                  : 'Waiting for the bot…'}
+              </p>
+              <button
+                type="button"
+                className="btn ghost"
+                style={{ marginTop: 10 }}
+                onClick={backToPhone}
+              >
+                Cancel
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      <div className="list-label" style={{ marginTop: 18 }}>
+        Linked numbers
+      </div>
+      {loading ? (
+        <div className="loading">Loading your numbers…</div>
+      ) : sessions.length === 0 ? (
+        <p className="hint">No WhatsApp numbers are linked yet.</p>
+      ) : (
+        sessions.map((session) => (
+          <div key={session.id} className="member-row">
+            <span className="body">
+              <b>{formatPhone(session.phone) || session.phone}</b>
+              <span>
+                {sessionStatusLabel(session.status)}
+                {session.updatedAt ? ` · last changed ${relativeTime(session.updatedAt)}` : ''}
+              </span>
+            </span>
+            <button
+              type="button"
+              className="btn danger"
+              disabled={busy}
+              onClick={() => void forget(session)}
+            >
+              Forget
+            </button>
+          </div>
+        ))
+      )}
+      <p className="hint" style={{ marginTop: 6 }}>
+        Forget removes a number from this list only. It does not log the device out of WhatsApp.
+      </p>
+
+      {notice ? (
+        <p className="hint" style={{ marginTop: 10 }}>
+          {notice}
+        </p>
+      ) : null}
+      {error ? <p className="error">{error}</p> : null}
     </Sheet>
   );
 }

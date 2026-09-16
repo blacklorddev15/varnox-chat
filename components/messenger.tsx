@@ -22,6 +22,7 @@ import {
   ProfilePanel,
   ChatInfoPanel,
   LinkedDevicesPanel,
+  WhatsAppLinkPanel,
 } from './panels';
 
 export type ReplyDraft = { id: string; text: string; senderName: string } | null;
@@ -102,6 +103,7 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
     | 'chat-info'
     | 'settings'
     | 'linked-devices'
+    | 'whatsapp-link'
     | 'starred'
     | 'search'
     | 'forward'
@@ -983,6 +985,7 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
           onSave={saveSettings}
           onEditProfile={() => setPanel('profile')}
           onLinkedDevices={() => setPanel('linked-devices')}
+          onLinkWhatsApp={() => setPanel('whatsapp-link')}
           onSignOut={signOut}
           onOpenStarred={openStarred}
           onToast={flash}
@@ -991,6 +994,10 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
 
       {panel === 'linked-devices' ? (
         <LinkedDevicesPanel onClose={() => setPanel(null)} />
+      ) : null}
+
+      {panel === 'whatsapp-link' ? (
+        <WhatsAppLinkPanel onClose={() => setPanel(null)} />
       ) : null}
 
       {panel === 'starred' ? (

@@ -20,6 +20,7 @@ import {
   IconPalette,
   IconStar,
   IconUser,
+  IconWhatsApp,
 } from './icons';
 
 const WALLS: { id: WallpaperId; label: string }[] = [
@@ -49,6 +50,7 @@ export function SettingsScreen({
   onSave,
   onEditProfile,
   onLinkedDevices,
+  onLinkWhatsApp,
   onSignOut,
   onOpenStarred,
   onToast,
@@ -59,6 +61,7 @@ export function SettingsScreen({
   onSave: (patch: Record<string, unknown>) => Promise<UserSettings | null>;
   onEditProfile: () => void;
   onLinkedDevices: () => void;
+  onLinkWhatsApp: () => void;
   onSignOut: () => void;
   onOpenStarred: () => void;
   onToast: (message: string) => void;
@@ -152,6 +155,15 @@ export function SettingsScreen({
                 <span className="txt">
                   Linked devices
                   <small>See where you are signed in, or link another device</small>
+                </span>
+              </button>
+              <button type="button" className="settings-row" onClick={onLinkWhatsApp}>
+                <span className="ic">
+                  <IconWhatsApp />
+                </span>
+                <span className="txt">
+                  Link WhatsApp
+                  <small>Pair a WhatsApp number with the bot that answers for it</small>
                 </span>
               </button>
             </div>

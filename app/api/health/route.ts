@@ -24,6 +24,10 @@ const REQUIRED_TABLES = [
   'vx_msg_views',
   'vx_calls',
   'vx_call_signals',
+  // The pairing bridge's tables are not in the vx_ namespace, because an external bot
+  // polls them by name and the names come from its source rather than from here.
+  'varnox_pairing_requests',
+  'varnox_sessions',
 ];
 const REQUIRED_COLUMNS: { table: string; column: string }[] = [
   { table: 'vx_users', column: 'email' },
