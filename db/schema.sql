@@ -829,3 +829,23 @@ create table if not exists vx_reports (
 -- reporter's open reports for one target.
 create index if not exists vx_reports_queue on vx_reports (status, at desc);
 create index if not exists vx_reports_reporter on vx_reports (reporter_id, target_id, status);
+
+-- ── Google sign-in ────────────────────────────────────────────────────────────────────────
+-- One row per linked Google account. The primary key is Google's own id and the provider, not
+-- the email address: an address can be changed on the Google side or handed to somebody else,
+-- so keying on it would let a recycled mailbox resolve to an account it no longer owns.
+--
+-- The unique index on user_id is missing on purpose — one Varnox account may hold several
+-- linked Google accounts, and nothing here depends on there being only one. The plain index is
+-- what lets account deletion and a profile screen find every identity that points at a user.
+create table if not exists vx_oauth_identities (
+  provider         text not null,
+  provider_user_id text not null,
+  user_id          text not null,
+  email            text,
+  created_at       bigint not null,
+  primary key (provider, provider_user_id)
+);
+
+create index if not exists vx_oauth_identities_user
+  on vx_oauth_identities (user_id);

@@ -42,6 +42,27 @@ type Step = {
 
 export const STEPS: Step[] = [
   {
+    kind: 'table',
+    label: 'vx_oauth_identities',
+    sql: `create table if not exists vx_oauth_identities (
+            provider         text not null,
+            provider_user_id text not null,
+            user_id          text not null,
+            email            text,
+            created_at       bigint not null,
+            primary key (provider, provider_user_id)
+          )`,
+  },
+  {
+    // Deleting an account has to be able to find every identity that points at it, and the
+    // lookup on sign-in is by (provider, provider_user_id) rather than by user, so the primary
+    // key does not serve this direction.
+    kind: 'index',
+    label: 'vx_oauth_identities_user',
+    sql: `create index if not exists vx_oauth_identities_user
+            on vx_oauth_identities (user_id)`,
+  },
+  {
     kind: 'column',
     label: 'vx_users.email',
     sql: `alter table vx_users add column if not exists email text`,

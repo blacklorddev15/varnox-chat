@@ -16,6 +16,10 @@ export const dynamic = 'force-dynamic';
  */
 const REQUIRED_TABLES = [
   'vx_users',
+  // Where a Google account is tied to a user. A missing table here does not break phone or
+  // password sign-in at all, so without this entry the only symptom would be a Google button
+  // that reports a server error — which reads like Google being broken rather than the schema.
+  'vx_oauth_identities',
   'vx_convs',
   'vx_messages',
   'vx_media',

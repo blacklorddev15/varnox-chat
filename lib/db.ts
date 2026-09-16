@@ -3619,6 +3619,47 @@ export async function listAdminAudit(limit = 50): Promise<AdminAuditEntry[]> {
 /* ── blocked numbers ───────────────────────────────────────────────────────── */
 
 /**
+ * Which account a Google account belongs to, or null if it has never been linked.
+ *
+ * Looked up by Google's own `sub` rather than by email address, because a `sub` is stable for
+ * the life of the account while an address can be changed or handed on. Keying on the address
+ * would mean a recycled mailbox could resolve to somebody else's Varnox account.
+ */
+export async function oauthUserId(
+  provider: string,
+  providerUserId: string
+): Promise<string | null> {
+  const rows = await q<{ user_id: string }>(
+    `select user_id from vx_oauth_identities
+      where provider = $1 and provider_user_id = $2`,
+    [provider, providerUserId]
+  );
+  return rows[0]?.user_id ?? null;
+}
+
+/**
+ * Attach a Google account to a Varnox account.
+ *
+ * `do nothing` on conflict rather than `do update`, and that is a boundary rather than an
+ * oversight: an update would let a later sign-in silently move an identity away from the
+ * account already holding it. Callers check oauthUserId() first and refuse instead, so this
+ * branch is only ever reached by a genuine race — and losing a race must not reassign anyone.
+ */
+export async function linkOauthIdentity(entry: {
+  provider: string;
+  providerUserId: string;
+  userId: string;
+  email: string | null;
+}): Promise<void> {
+  await q(
+    `insert into vx_oauth_identities (provider, provider_user_id, user_id, email, created_at)
+     values ($1, $2, $3, $4, $5)
+     on conflict (provider, provider_user_id) do nothing`,
+    [entry.provider, entry.providerUserId, entry.userId, entry.email, Date.now()]
+  );
+}
+
+/**
  * Is this number barred from signing up or signing in?
  *
  * Keyed through phoneKey so the answer does not depend on how the number was typed. Asked with a

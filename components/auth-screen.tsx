@@ -86,7 +86,39 @@ const TERMS_SUMMARY: string[] = [
 /** What the notifications step can end up saying. */
 type NotifyOutcome = 'granted' | 'denied' | 'dismissed' | 'unavailable' | 'skipped';
 
-export function AuthScreen({ next }: { next?: string }) {
+/**
+ * What the sign-in screen says when the browser comes back from Google without a session.
+ *
+ * These are the other half of the callback route: it deliberately redirects with a short reason
+ * code rather than prose, because the wording belongs next to the form the visitor is looking
+ * at rather than in a URL. A code with no entry here falls back to a generic line, so a reason
+ * added on the server later degrades to something readable instead of showing a raw key.
+ */
+const GOOGLE_ERRORS: Record<string, string> = {
+  unconfigured: 'Google sign-in is not set up on this server yet. Use your phone number instead.',
+  denied: 'Google sign-in was cancelled.',
+  state: 'That sign-in took too long, or began in a different browser. Please try again.',
+  exchange: 'Google could not confirm the sign-in. Please try again.',
+  keys: 'Could not reach Google to check the sign-in. Please try again in a moment.',
+  token: 'Google returned something that could not be verified. Please try again.',
+  gone: 'That Google account is not attached to an active Varnox account.',
+};
+
+export function AuthScreen({
+  next,
+  google,
+  googleReady,
+}: {
+  next?: string;
+  /** Why the browser is back from Google, when it is. */
+  google?: string;
+  /**
+   * Whether this deployment has Google credentials at all. Decided on the server, so a
+   * deployment without them does not offer a button that can only explain itself after a full
+   * trip to Google and back.
+   */
+  googleReady?: boolean;
+}) {
   const router = useRouter();
   const [step, setStep] = useState<Step>('phone');
 
@@ -162,6 +194,31 @@ export function AuthScreen({ next }: { next?: string }) {
   useEffect(() => {
     if (step === 'code') boxes.current[0]?.focus();
   }, [step]);
+
+  /**
+   * What to do on the way back from Google.
+   *
+   * Runs once. The query string is how the callback reports its outcome, and re-reading it on
+   * every render would keep re-applying a message the visitor has already moved past.
+   *
+   * A first-time Google visitor is switched into the ordinary signup wizard rather than being
+   * signed up here, and that is the decision worth noticing: the wizard asks for a phone number
+   * first, and that number then goes through exactly the checks a phone signup goes through,
+   * including the block list. Creating an account during the callback instead would have meant
+   * a second way into the database that has to remember to repeat every one of them.
+   */
+  useEffect(() => {
+    if (!google) return;
+    if (google === 'new') {
+      setPasswordMode('register');
+      setSignupStep(1);
+      setStep('password');
+      setNotice('');
+      setError('');
+      return;
+    }
+    setError(GOOGLE_ERRORS[google] ?? 'Google sign-in did not complete. Please try again.');
+  }, []);
 
   useEffect(
     () => () => {
@@ -454,6 +511,9 @@ export function AuthScreen({ next }: { next?: string }) {
           phone: composed(),
           username: username.trim().toLowerCase(),
           password,
+          // Nothing about Google is sent from here. The claim that a Google account was
+          // verified travels in an httpOnly cookie the callback set, which the server reads —
+          // so this request is byte-for-byte what it was before Google existed.
         });
         // The session cookie is already set, so the account exists: only the optional
         // picture is left, and it is uploaded on its own rather than on the way in.
@@ -532,6 +592,26 @@ export function AuthScreen({ next }: { next?: string }) {
                 {busy ? 'Sending…' : 'Send code'}
               </button>
             </form>
+
+            {googleReady ? (
+              /*
+                A plain link rather than a fetch. The browser has to leave for Google's own site,
+                so nothing here can be broken by JavaScript that has not run yet — and a visitor
+                whose connection drops mid-flow is simply back where they started.
+              */
+              <a
+                className="btn ghost"
+                href={`/api/auth/google${next ? `?next=${encodeURIComponent(next)}` : ''}`}
+                style={{
+                  display: 'block',
+                  textAlign: 'center',
+                  marginTop: 12,
+                  textDecoration: 'none',
+                }}
+              >
+                Continue with Google
+              </a>
+            ) : null}
 
             <div className="switch-line">
               <button type="button" onClick={() => { setStep('password'); setError(''); setNotice(''); }}>
