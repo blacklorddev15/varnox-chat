@@ -1,11 +1,12 @@
 import crypto from 'node:crypto';
 import { cookies } from 'next/headers';
 import type { SessionPayload, User, PublicUser } from './types';
-import { getUser } from './db';
+import { getUser, isDeviceActive } from './db';
 
 const COOKIE = 'varnox_session';
 const SECRET = process.env.SESSION_SECRET || 'varnox-local-dev-secret';
-const MAX_AGE = 60 * 60 * 24 * 30;
+const SESSION_DAYS = 30;
+const MAX_AGE = 60 * 60 * 24 * SESSION_DAYS;
 
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -27,8 +28,11 @@ function b64u(buf: Buffer): string {
   return buf.toString('base64url');
 }
 
-export function signSession(uid: string, days = 30): string {
+export function signSession(uid: string, days = SESSION_DAYS, did?: string): string {
   const payload: SessionPayload = { uid, exp: Date.now() + days * 86_400_000 };
+  // The device id rides in the cookie rather than in a second cookie or a lookup: a session
+  // then knows which device it belongs to, which is what makes revoking one possible.
+  if (did) payload.did = did;
   const body = b64u(Buffer.from(JSON.stringify(payload)));
   const sig = b64u(crypto.createHmac('sha256', SECRET).update(body).digest());
   return `${body}.${sig}`;
@@ -51,9 +55,9 @@ export function verifySession(token: string | undefined | null): SessionPayload 
   }
 }
 
-export async function setSessionCookie(uid: string) {
+export async function setSessionCookie(uid: string, did?: string) {
   const jar = await cookies();
-  jar.set(COOKIE, signSession(uid), {
+  jar.set(COOKIE, signSession(uid, SESSION_DAYS, did), {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
@@ -67,11 +71,31 @@ export async function clearSessionCookie() {
   jar.set(COOKIE, '', { httpOnly: true, path: '/', maxAge: 0 });
 }
 
-/** Resolve the signed-in user, or null. */
+/**
+ * The device this request's session was issued to, when it carries one.
+ *
+ * A cookie minted before devices existed has no id, and neither does one signed in with a
+ * password or a phone code, so callers have to cope with null.
+ */
+export async function currentDeviceId(): Promise<string | null> {
+  const jar = await cookies();
+  const payload = verifySession(jar.get(COOKIE)?.value);
+  return payload?.did ?? null;
+}
+
+/**
+ * Resolve the signed-in user, or null.
+ *
+ * A cookie stays cryptographically valid after its device is signed out from somewhere else,
+ * so a session that names a device is checked against that device's row as well — cached for
+ * a few seconds, because this runs on every authenticated request. Sessions without a device
+ * id are exactly what they always were and are not second-guessed.
+ */
 export async function currentUser(): Promise<User | null> {
   const jar = await cookies();
   const payload = verifySession(jar.get(COOKIE)?.value);
   if (!payload) return null;
+  if (payload.did && !(await isDeviceActive(payload.did))) return null;
   return getUser(payload.uid);
 }
 

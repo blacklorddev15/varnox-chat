@@ -288,3 +288,41 @@ create table if not exists vx_msg_views (
 -- { lat, lng } (and an optional label) for 'location', { name, phone } for 'contact'.
 -- Every other message type leaves this null.
 alter table vx_messages add column if not exists payload jsonb;
+
+/* ── linked devices ───────────────────────────────────────────────────── */
+
+-- One row per device signed in to an account. The session cookie carries the device id, so
+-- a revocation can end that session on its next request instead of leaving a stolen device
+-- signed in until the cookie expires.
+--
+-- `revoked_at` is the whole of a logout: the row and its history stay, but the device is no
+-- longer signed in. Sessions issued before devices existed carry no id at all and are not
+-- represented here.
+create table if not exists vx_devices (
+  id         text primary key,
+  user_id    text not null,
+  label      text,
+  user_agent text,
+  ip         text,
+  created_at bigint not null,
+  last_seen  bigint not null,
+  revoked_at bigint
+);
+
+/* ── linking a device by code ─────────────────────────────────────────── */
+
+-- A short code shown on a device that is signed in and typed on one that is not. `code` is
+-- the primary key, so `... where code = $1` is a single-row lookup.
+--
+-- `consumed_at` is what makes redemption single-use: the atomic update only matches while it
+-- is null, so two simultaneous attempts cannot both win. The row is kept after use as an
+-- audit trail, and only ever one code per account is live: minting a new one marks the old
+-- row consumed. `consumed_agent` records which device spent it.
+create table if not exists vx_link_codes (
+  code           text primary key,
+  user_id        text not null,
+  created_at     bigint not null,
+  expires_at     bigint not null,
+  consumed_at    bigint,
+  consumed_agent text
+);

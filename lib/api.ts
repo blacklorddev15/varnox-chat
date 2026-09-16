@@ -59,3 +59,53 @@ export async function readJsonBody<T>(req: Request): Promise<T> {
 export function clean(text: unknown, max = 4000): string {
   return String(text ?? '').replace(/\u0000/g, '').slice(0, max).trim();
 }
+
+/**
+ * Best-effort client address, used only to label a row in the user's own device list —
+ * never an authorisation decision, so a spoofed value costs the caller nothing but a
+ * misleading label on their own screen.
+ */
+export function clientIp(req: Request): string | null {
+  const forwarded = req.headers.get('x-forwarded-for');
+  if (forwarded) {
+    const first = forwarded.split(',')[0]?.trim();
+    if (first) return first.slice(0, 60);
+  }
+  return req.headers.get('x-real-ip')?.trim().slice(0, 60) ?? null;
+}
+
+export function userAgent(req: Request): string | null {
+  return clean(req.headers.get('user-agent'), 200) || null;
+}
+
+/**
+ * A short, human label for a device — "Chrome on Android" rather than a user-agent string,
+ * because the device list is meant to be scanned to spot the one that is not yours.
+ */
+export function deviceLabel(req: Request): string {
+  const ua = req.headers.get('user-agent') ?? '';
+  const browser = /Edg\//.test(ua)
+    ? 'Edge'
+    : /OPR\//.test(ua)
+      ? 'Opera'
+      : /Chrome\//.test(ua)
+        ? 'Chrome'
+        : /Firefox\//.test(ua)
+          ? 'Firefox'
+          : /Safari\//.test(ua)
+            ? 'Safari'
+            : '';
+  const os = /Android/.test(ua)
+    ? 'Android'
+    : /iPhone|iPad|iPod/.test(ua)
+      ? 'iOS'
+      : /Windows/.test(ua)
+        ? 'Windows'
+        : /Mac OS X/.test(ua)
+          ? 'macOS'
+          : /Linux/.test(ua)
+            ? 'Linux'
+            : '';
+  if (browser && os) return `${browser} on ${os}`;
+  return browser || os || 'Unknown device';
+}

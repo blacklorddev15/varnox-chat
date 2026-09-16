@@ -110,6 +110,32 @@ const STEPS: Step[] = [
             primary key (message_id, user_id)
           )`,
   },
+  {
+    kind: 'table',
+    label: 'vx_devices',
+    sql: `create table if not exists vx_devices (
+            id         text primary key,
+            user_id    text not null,
+            label      text,
+            user_agent text,
+            ip         text,
+            created_at bigint not null,
+            last_seen  bigint not null,
+            revoked_at bigint
+          )`,
+  },
+  {
+    kind: 'table',
+    label: 'vx_link_codes',
+    sql: `create table if not exists vx_link_codes (
+            code           text primary key,
+            user_id        text not null,
+            created_at     bigint not null,
+            expires_at     bigint not null,
+            consumed_at    bigint,
+            consumed_agent text
+          )`,
+  },
 ];
 
 /** A request waits this long for reconciliation, then carries on without it. */

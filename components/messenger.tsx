@@ -14,7 +14,13 @@ import { Sidebar } from './sidebar';
 import { ChatPane } from './chat-pane';
 import { SettingsScreen } from './settings-screen';
 import { StarredPanel, SearchPanel, ForwardPanel } from './overlays';
-import { NewChatPanel, NewGroupPanel, ProfilePanel, ChatInfoPanel } from './panels';
+import {
+  NewChatPanel,
+  NewGroupPanel,
+  ProfilePanel,
+  ChatInfoPanel,
+  LinkedDevicesPanel,
+} from './panels';
 
 export type ReplyDraft = { id: string; text: string; senderName: string } | null;
 
@@ -82,7 +88,16 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
   const [reply, setReply] = useState<ReplyDraft>(null);
   const [selection, setSelection] = useState<string[]>([]);
   const [panel, setPanel] = useState<
-    null | 'new-chat' | 'new-group' | 'profile' | 'chat-info' | 'settings' | 'starred' | 'search' | 'forward'
+    | null
+    | 'new-chat'
+    | 'new-group'
+    | 'profile'
+    | 'chat-info'
+    | 'settings'
+    | 'linked-devices'
+    | 'starred'
+    | 'search'
+    | 'forward'
   >(null);
   const [starred, setStarred] = useState<StarredItem[]>([]);
   const [toast, setToast] = useState('');
@@ -834,10 +849,15 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
           onClose={() => setPanel(null)}
           onSave={saveSettings}
           onEditProfile={() => setPanel('profile')}
+          onLinkedDevices={() => setPanel('linked-devices')}
           onSignOut={signOut}
           onOpenStarred={openStarred}
           onToast={flash}
         />
+      ) : null}
+
+      {panel === 'linked-devices' ? (
+        <LinkedDevicesPanel onClose={() => setPanel(null)} />
       ) : null}
 
       {panel === 'starred' ? (

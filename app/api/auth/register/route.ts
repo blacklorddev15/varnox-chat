@@ -5,8 +5,9 @@ import {
   publicUser,
   setSessionCookie,
 } from '@/lib/auth';
-import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
+import { bad, clean, clientIp, deviceLabel, handle, ok, readJsonBody, userAgent } from '@/lib/api';
 import {
+  createDevice,
   emailTaken,
   getUserByUsername,
   phoneTaken,
@@ -109,7 +110,15 @@ export async function POST(req: Request) {
     if (phone) await reservePhone(phone, user.id);
     await reserveUsername(wanted, user.id);
     await saveUser(user);
-    await setSessionCookie(user.id);
+
+    // Every sign-in becomes a device, not just a linked one, so the device list is a complete
+    // picture and any of them can be signed out from another.
+    const device = await createDevice(user.id, {
+      label: deviceLabel(req),
+      userAgent: userAgent(req),
+      ip: clientIp(req),
+    });
+    await setSessionCookie(user.id, device.id);
 
     return ok({ user: publicUser(user) }, 201);
   });

@@ -9,6 +9,7 @@ import {
   IconBell,
   IconBlock,
   IconChat,
+  IconLink,
   IconLock,
   IconPalette,
   IconStar,
@@ -35,6 +36,7 @@ export function SettingsScreen({
   onClose,
   onSave,
   onEditProfile,
+  onLinkedDevices,
   onSignOut,
   onOpenStarred,
   onToast,
@@ -44,6 +46,7 @@ export function SettingsScreen({
   onClose: () => void;
   onSave: (patch: Record<string, unknown>) => Promise<UserSettings | null>;
   onEditProfile: () => void;
+  onLinkedDevices: () => void;
   onSignOut: () => void;
   onOpenStarred: () => void;
   onToast: (message: string) => void;
@@ -128,6 +131,15 @@ export function SettingsScreen({
                 <span className="txt">
                   Privacy
                   <small>Last seen, profile photo and read receipts</small>
+                </span>
+              </button>
+              <button type="button" className="settings-row" onClick={onLinkedDevices}>
+                <span className="ic">
+                  <IconLink />
+                </span>
+                <span className="txt">
+                  Linked devices
+                  <small>See where you are signed in, or link another device</small>
                 </span>
               </button>
             </div>
