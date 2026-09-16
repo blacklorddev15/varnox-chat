@@ -74,7 +74,7 @@ export function Sidebar({
   callStarting: boolean;
   onTab: (tab: 'chats' | 'updates' | 'channels' | 'calls') => void;
   onToast: (message: string) => void;
-  onCall: (userId: string, kind: 'audio' | 'video') => void;
+  onCall: (userIds: string[], kind: 'audio' | 'video') => void;
   onFilter: (f: 'all' | 'unread' | 'groups') => void;
   onSelectChat: (id: string) => void;
   onNewChat: () => void;

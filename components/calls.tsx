@@ -7,8 +7,18 @@ import { presence, relativeTime } from '@/lib/format';
 import { Avatar } from './avatar';
 import { Sheet, useUserSearch } from './panels';
 import {
+  activePeers,
+  describeCall,
+  hangUpEndpoint,
+  joinedParticipants,
+  peerFailureEndsCall,
+  reconcile,
+  shouldOffer,
+} from '@/lib/mesh';
+import {
   IconBack,
   IconCallEnd,
+  IconClose,
   IconMic,
   IconMicOff,
   IconNewCall,
@@ -16,6 +26,7 @@ import {
   IconPhoneIncoming,
   IconPhoneMissed,
   IconPhoneOutgoing,
+  IconPlus,
   IconSearch,
   IconSpeaker,
   IconSpeakerOff,
@@ -107,17 +118,30 @@ export function NewCallPanel({
   recents,
 }: {
   onClose: () => void;
-  onPick: (userId: string, kind: CallKind) => void;
+  /** One id for a one-to-one call, several for a group call. */
+  onPick: (userIds: string[], kind: CallKind) => void;
   recents: PublicUser[];
 }) {
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState<CallKind>('audio');
+  /* People added for a group call. Tapping a row still calls one person outright, so the
+     common case stays a single tap and this is only for the second person onwards. */
+  const [extra, setExtra] = useState<string[]>([]);
   const { results, searching } = useUserSearch(query);
   const searchingText = query.trim();
   const rows = searchingText ? results : recents;
 
+  const toggleExtra = (userId: string) => {
+    setExtra((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
+  };
+
   return (
-    <Sheet title="New call" onClose={onClose}>
+    <Sheet
+      title={extra.length ? `Group call · ${extra.length + 1} people` : 'New call'}
+      onClose={onClose}
+    >
       <div className="call-kind">
         <button
           type="button"
@@ -160,24 +184,47 @@ export function NewCallPanel({
               People you already chat with
             </p>
           ) : null}
-          {rows.map((user) => (
-            <button
-              key={user.id}
-              type="button"
-              className="pick-row"
-              onClick={() => onPick(user.id, kind)}
-            >
-              <Avatar name={user.displayName} src={user.avatar} size={44} />
-              <span className="body">
-                <b>{user.displayName}</b>
-                <span>
-                  {kind === 'video' ? 'Video call' : 'Voice call'} · {presence(user.lastSeen)}
-                </span>
-              </span>
-            </button>
-          ))}
+          {rows.map((user) => {
+            const chosen = extra.includes(user.id);
+            return (
+              <div key={user.id} className="pick-flex">
+                <button
+                  type="button"
+                  className="pick-row"
+                  onClick={() => onPick([user.id], kind)}
+                >
+                  <Avatar name={user.displayName} src={user.avatar} size={44} />
+                  <span className="body">
+                    <b>{user.displayName}</b>
+                    <span>
+                      {kind === 'video' ? 'Video call' : 'Voice call'} · {presence(user.lastSeen)}
+                    </span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`pick-add${chosen ? ' on' : ''}`}
+                  onClick={() => toggleExtra(user.id)}
+                  title={chosen ? 'Remove from the group call' : 'Add to a group call'}
+                >
+                  {chosen ? <IconClose size={15} /> : <IconPlus size={15} />}
+                </button>
+              </div>
+            );
+          })}
         </>
       )}
+
+      {extra.length ? (
+        <div className="pick-footer">
+          <span>
+            {extra.length} {extra.length === 1 ? 'person' : 'people'} added
+          </span>
+          <button type="button" className="btn" onClick={() => onPick(extra, kind)}>
+            {kind === 'video' ? 'Start video call' : 'Start voice call'}
+          </button>
+        </div>
+      ) : null}
     </Sheet>
   );
 }
@@ -199,7 +246,7 @@ export function CallsScreen({
   /** Back to chats. Only drawn on wide screens, where the tab bar is hidden. */
   onBack: () => void;
   onToast: (message: string) => void;
-  onCall: (userId: string, kind: CallKind) => void;
+  onCall: (userIds: string[], kind: CallKind) => void;
   starting: boolean;
 }) {
   const [calls, setCalls] = useState<Call[]>([]);
@@ -240,7 +287,7 @@ export function CallsScreen({
         type="button"
         className="chat-item"
         disabled={starting}
-        onClick={() => onCall(call.peer.id, call.kind)}
+        onClick={() => onCall([call.peer.id], call.kind)}
         title={`Call ${call.peer.displayName} again`}
       >
         <span className="call-face">
@@ -311,9 +358,9 @@ export function CallsScreen({
         <NewCallPanel
           recents={recents}
           onClose={() => setPicking(false)}
-          onPick={(userId, kind) => {
+          onPick={(userIds, kind) => {
             setPicking(false);
-            onCall(userId, kind);
+            onCall(userIds, kind);
           }}
         />
       ) : null}
@@ -393,6 +440,59 @@ export function IncomingCall({
  * only thing that turns the recording indicator off, and a call that ends without it leaves a
  * light on.
  */
+/** One connection to one other person, and everything hanging off it. */
+type PeerLink = {
+  pc: RTCPeerConnection;
+  /** Their tracks, once they start arriving. */
+  stream: MediaStream;
+  /** Candidates that arrived before there was a remote description to attach them to. */
+  pending: RTCIceCandidateInit[];
+  /** Set once a remote description exists, which is when addIceCandidate starts working. */
+  ready: boolean;
+};
+
+/**
+ * The other end's picture and sound.
+ *
+ * An element per peer, because a mesh has one stream per person. srcObject cannot be set as an
+ * attribute — React has no prop for it — so it is attached in an effect.
+ */
+function PeerMedia({ stream, video }: { stream: MediaStream; video: boolean }) {
+  const ref = useRef<HTMLVideoElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || el.srcObject === stream) return;
+    el.srcObject = stream;
+    // Autoplay with sound can be refused. The tap that got somebody here counts as the gesture,
+    // so a rejection means the browser wanted something else, not that the audio is broken.
+    el.play().catch(() => undefined);
+  }, [stream]);
+  // A voice call keeps the element in the tree, hidden — it is what plays the other person.
+  return (
+    <video
+      ref={ref}
+      className={video ? 'call-tile-video' : 'call-tile-audio'}
+      autoPlay
+      playsInline
+    />
+  );
+}
+
+/**
+ * The in-call screen, for one-to-one and for group calls alike.
+ *
+ * One-to-one is the degenerate case of the mesh: two participants, so exactly one connection,
+ * and the code does not need to know the difference. What it does need is to know who is on the
+ * call, which comes from `call.participants` — the state per person, not just the list.
+ *
+ * Connections are opened to people who have *joined*, never to people still being rung: an
+ * invitee has no media to send, so a connection to them would negotiate with nothing on the
+ * other end and sit there dead until they answered or the ring expired.
+ *
+ * Each pair is negotiated once, by the side that loses the id comparison in
+ * `shouldOffer`. Nothing is renegotiated — somebody joining opens one new connection on each
+ * browser already in the call, and that is the only topology change there is.
+ */
 export function CallScreen({
   me,
   call,
@@ -410,20 +510,40 @@ export function CallScreen({
   const [cameraOn, setCameraOn] = useState(call.kind === 'video');
   const [speaker, setSpeaker] = useState(false);
   const [swapped, setSwapped] = useState(false);
-  const [connected, setConnected] = useState(false);
+  /** Who we are actually connected to, for the connecting label. */
+  const [livePeers, setLivePeers] = useState<string[]>([]);
+  /** Each peer's media, so React can draw one element per person. */
+  const [remotes, setRemotes] = useState<Record<string, MediaStream>>({});
 
   const localRef = useRef<HTMLVideoElement | null>(null);
-  const remoteRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const cleanupRef = useRef<(() => void) | null>(null);
+  const linksRef = useRef<Map<string, PeerLink>>(new Map());
+  /** Candidates whose peer has not been negotiated yet, held rather than dropped. */
+  const orphanRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
+  const iceRef = useRef<RTCIceServer[]>([]);
+  const teardownRef = useRef<(() => void) | null>(null);
+  const reconcileRef = useRef<(() => void) | null>(null);
+  const hangUpRef = useRef<() => void>(() => undefined);
   const endedRef = useRef(false);
 
   const outgoing = call.callerId === me.id;
   const answeredAt = call.answeredAt;
+  const video = call.kind === 'video';
 
-  /* Elapsed time, counted from answered_at, so both ends show the same number. Before it is
-     answered there is nothing to count, and the label says what is happening instead. */
+  const others = joinedParticipants(call.participants).filter((p) => p.user.id !== me.id);
+  const peerIds = activePeers(call.participants, me.id);
+  // A stable key for "the people I should be connected to", so the reconcile effect runs when
+  // that set changes and not on every poll — the call object is replaced every second.
+  const peerKey = peerIds.slice().sort().join(',');
+
+  /* Read by the long-lived effect below, which must not restart when the call object is
+     replaced by the poll or when the toast callback changes identity. */
+  const latestRef = useRef({ participants: call.participants, onToast });
+  useEffect(() => {
+    latestRef.current = { participants: call.participants, onToast };
+  });
+
+  /* Elapsed time, counted from answered_at, so both ends show the same number. */
   useEffect(() => {
     if (!answeredAt) return;
     const tick = () => setSeconds(Math.max(0, Math.floor((Date.now() - answeredAt) / 1000)));
@@ -432,76 +552,155 @@ export function CallScreen({
     return () => window.clearInterval(id);
   }, [answeredAt]);
 
-  /* One teardown, called from three places: the hang-up button, the effect cleanup, and a
-     connection that fails or closes on its own. Doing it twice is harmless. */
+  /* One teardown, called from the hang-up button, the effect cleanup, and a connection that
+     fails. Doing it twice is harmless. */
   const hangUp = useCallback(() => {
+    if (endedRef.current) return;
     endedRef.current = true;
-    cleanupRef.current?.();
-    cleanupRef.current = null;
-    // Tell the other end, and record the duration, before this screen goes. A failure here is
-    // not worth reporting: the live-call poll will notice the call is gone either way.
-    void post(`/api/calls/${call.id}/end`).catch(() => undefined);
+    teardownRef.current?.();
+    teardownRef.current = null;
+    // A two-person call ends; a larger one is only left, and carries on without you. Which of
+    // the two this is depends on how many people are on the call, not on who is hanging up.
+    const endpoint = hangUpEndpoint(latestRef.current.participants.length);
+    // Tell the other end before this screen goes. A failure here is not worth reporting: the
+    // live-call poll will notice the call is gone either way.
+    void post(`/api/calls/${call.id}/${endpoint}`).catch(() => undefined);
     onEnded();
   }, [call.id, onEnded]);
+
+  useEffect(() => {
+    hangUpRef.current = hangUp;
+  }, [hangUp]);
 
   useEffect(() => {
     let cancelled = false;
     let timer = 0;
     let lastSeq = 0;
-    /** Candidates that arrived before there was a remote description to attach them to. */
-    const pending: RTCIceCandidateInit[] = [];
-    let remoteReady = false;
+
+    const links = linksRef.current;
+    const orphans = orphanRef.current;
+
+    function clearPeer(peerId: string) {
+      const link = links.get(peerId);
+      if (!link) return;
+      links.delete(peerId);
+      try {
+        link.pc.close();
+      } catch {
+        /* already closed */
+      }
+      orphans.delete(peerId);
+      if (cancelled) return;
+      setRemotes((prev) => {
+        if (!(peerId in prev)) return prev;
+        const next = { ...prev };
+        delete next[peerId];
+        return next;
+      });
+      setLivePeers((prev) => prev.filter((id) => id !== peerId));
+    }
 
     function stopEverything() {
+      for (const peerId of [...links.keys()]) clearPeer(peerId);
+      // The local stream is shared by every connection, so it is stopped once, here — never in
+      // clearPeer, which would kill everybody else's audio with the first person who left.
       try {
         streamRef.current?.getTracks().forEach((track) => track.stop());
       } catch {
         /* nothing to stop */
       }
       streamRef.current = null;
-      try {
-        pcRef.current?.close();
-      } catch {
-        /* already closed */
-      }
-      pcRef.current = null;
       if (timer) window.clearInterval(timer);
       timer = 0;
+      reconcileRef.current = null;
     }
-    cleanupRef.current = stopEverything;
+    teardownRef.current = stopEverything;
 
-    async function send(kind: CallSignal['kind'], payload: unknown) {
+    async function send(kind: CallSignal['kind'], payload: unknown, to?: string) {
       try {
-        await post(`/api/calls/${call.id}/signal`, { kind, payload: JSON.stringify(payload) });
+        await post(`/api/calls/${call.id}/signal`, {
+          kind,
+          payload: JSON.stringify(payload),
+          // Addressed at one peer. An ICE candidate in particular is meaningless to anybody
+          // else, and unaddressed it would be read by every other participant as well.
+          ...(to ? { to } : {}),
+        });
       } catch {
         /* the call may have ended under us — the live-call poll will notice first */
       }
     }
 
-    function showRemote(stream: MediaStream) {
-      const el = remoteRef.current;
-      if (!el) return;
-      el.srcObject = stream;
-      el.play().catch(() => undefined);
-      setConnected(true);
-    }
-
-    /** Attach the candidates that were waiting for a remote description. */
-    async function flushPending(pc: RTCPeerConnection, queue: RTCIceCandidateInit[]) {
-      while (queue.length) {
-        const init = queue.shift();
+    async function flush(link: PeerLink) {
+      while (link.pending.length) {
+        const init = link.pending.shift();
         if (!init) break;
         try {
-          await pc.addIceCandidate(init);
+          await link.pc.addIceCandidate(init);
         } catch {
           /* a candidate that arrives too late is useless, not an error */
         }
       }
     }
 
+    function ensureLink(peerId: string): PeerLink | null {
+      const existing = links.get(peerId);
+      if (existing) return existing;
+      const media = streamRef.current;
+      if (!media) return null;
+
+      const pc = new RTCPeerConnection({ iceServers: iceRef.current });
+      const link: PeerLink = { pc, stream: new MediaStream(), pending: [], ready: false };
+      links.set(peerId, link);
+
+      for (const track of media.getTracks()) pc.addTrack(track, media);
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) void send('candidate', event.candidate.toJSON(), peerId);
+      };
+
+      pc.ontrack = (event) => {
+        const stream = event.streams[0];
+        if (!stream) return;
+        link.stream = stream;
+        if (!cancelled) setRemotes((prev) => ({ ...prev, [peerId]: stream }));
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (cancelled || endedRef.current) return;
+        if (pc.connectionState === 'connected') {
+          setLivePeers((prev) => (prev.includes(peerId) ? prev : [...prev, peerId]));
+          return;
+        }
+        if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+          const count = latestRef.current.participants.length;
+          clearPeer(peerId);
+          if (peerFailureEndsCall(count)) {
+            // Nobody else to talk to. This is what the screen did before group calls, kept.
+            hangUpRef.current();
+          } else {
+            // One bad connection must not take the call away from everybody still in it.
+            latestRef.current.onToast('Lost the connection to one person on the call');
+          }
+        }
+      };
+
+      // Candidates that arrived before the offer did — the two travel as separate requests and
+      // nothing guarantees the offer's finishes first.
+      const queued = orphans.get(peerId);
+      if (queued) {
+        link.pending.push(...queued);
+        orphans.delete(peerId);
+      }
+
+      return link;
+    }
+
     async function applySignal(signal: CallSignal) {
-      const pc = pcRef.current;
-      if (!pc || signal.fromId === me.id) return;
+      if (signal.fromId === me.id) return;
+      const peerId = signal.fromId;
+
+      // Only somebody on this call is worth negotiating with.
+      if (!activePeers(latestRef.current.participants, me.id).includes(peerId)) return;
 
       if (signal.kind === 'candidate') {
         let init: RTCIceCandidateInit;
@@ -510,17 +709,23 @@ export function CallScreen({
         } catch {
           return;
         }
+        const link = links.get(peerId);
+        if (!link) {
+          const queue = orphans.get(peerId) ?? [];
+          queue.push(init);
+          orphans.set(peerId, queue);
+          return;
+        }
         // An ICE candidate applies only once a remote description is set. Applying one earlier
-        // fails silently — no error, no connection — which is the classic WebRTC dead end, so
-        // these wait here and are flushed the moment there is a description to add them to.
-        if (!remoteReady) {
-          pending.push(init);
+        // fails silently — no error, no connection — which is the classic WebRTC dead end.
+        if (!link.ready) {
+          link.pending.push(init);
           return;
         }
         try {
-          await pc.addIceCandidate(init);
+          await link.pc.addIceCandidate(init);
         } catch {
-          /* a candidate that arrives too late is useless, not an error */
+          /* too late to matter */
         }
         return;
       }
@@ -533,29 +738,62 @@ export function CallScreen({
       }
 
       if (signal.kind === 'offer') {
-        if (outgoing) return; // the caller makes the offer; a stray one from it is ignored
+        // Never both sides for one pair: exactly one offers, decided by id in shouldOffer. So
+        // there is no collision to recover from here — the "polite peer" case does not arise.
+        const link = ensureLink(peerId);
+        if (!link) return;
         try {
-          await pc.setRemoteDescription(description);
+          await link.pc.setRemoteDescription(description);
         } catch {
           return;
         }
-        remoteReady = true;
-        await flushPending(pc, pending);
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        await send('answer', { type: answer.type, sdp: answer.sdp });
+        link.ready = true;
+        await flush(link);
+        try {
+          const answer = await link.pc.createAnswer();
+          await link.pc.setLocalDescription(answer);
+          await send('answer', { type: answer.type, sdp: answer.sdp }, peerId);
+        } catch {
+          /* the call ended mid-negotiation */
+        }
         return;
       }
 
-      if (!outgoing) return; // only the caller expects an answer
+      // An answer, for an offer this side made.
+      const link = links.get(peerId);
+      if (!link) return;
       try {
-        await pc.setRemoteDescription(description);
+        await link.pc.setRemoteDescription(description);
       } catch {
         return;
       }
-      remoteReady = true;
-      await flushPending(pc, pending);
+      link.ready = true;
+      await flush(link);
     }
+
+    async function reconcilePeers() {
+      if (cancelled || endedRef.current) return;
+      const desired = activePeers(latestRef.current.participants, me.id);
+      const { open, close } = reconcile([...links.keys()], desired);
+
+      for (const peerId of close) clearPeer(peerId);
+
+      for (const peerId of open) {
+        // The designated side offers; the other waits for the offer already on its way. This is
+        // what stops both ends creating a connection to each other.
+        if (!shouldOffer(me.id, peerId)) continue;
+        const link = ensureLink(peerId);
+        if (!link) continue;
+        try {
+          const offer = await link.pc.createOffer();
+          await link.pc.setLocalDescription(offer);
+          await send('offer', { type: offer.type, sdp: offer.sdp }, peerId);
+        } catch {
+          /* the call ended mid-negotiation */
+        }
+      }
+    }
+    reconcileRef.current = reconcilePeers;
 
     async function poll() {
       if (cancelled || endedRef.current) return;
@@ -574,11 +812,12 @@ export function CallScreen({
 
     async function start() {
       try {
-        // ICE first, so a deployment with TURN gets one allocation rather than a failed
-        // attempt followed by a retry.
+        // ICE first, so a deployment with TURN gets one allocation rather than a failed attempt
+        // followed by a retry.
         const ice = await api<{ iceServers: RTCIceServer[] }>('/api/calls/ice');
+        iceRef.current = ice.iceServers;
         const media = await navigator.mediaDevices.getUserMedia(
-          call.kind === 'video' ? { audio: true, video: true } : { audio: true }
+          video ? { audio: true, video: true } : { audio: true }
         );
         // The call can end while the permission prompt is up. Whoever stopped it wins.
         if (cancelled || endedRef.current) {
@@ -591,42 +830,14 @@ export function CallScreen({
           localRef.current.play().catch(() => undefined);
         }
 
-        const pc = new RTCPeerConnection({ iceServers: ice.iceServers });
-        pcRef.current = pc;
-        for (const track of media.getTracks()) pc.addTrack(track, media);
-
-        pc.onicecandidate = (event) => {
-          if (event.candidate) void send('candidate', event.candidate.toJSON());
-        };
-        pc.ontrack = (event) => {
-          const stream = event.streams[0];
-          if (stream) showRemote(stream);
-        };
-        pc.onconnectionstatechange = () => {
-          if (pc.connectionState === 'connected') setConnected(true);
-          // A connection that fails or closes is a call that is over, whether or not anybody
-          // tapped anything — the other side may simply have gone away.
-          if (
-            !cancelled &&
-            !endedRef.current &&
-            (pc.connectionState === 'failed' || pc.connectionState === 'closed')
-          ) {
-            hangUp();
-          }
-        };
-
-        if (outgoing) {
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          await send('offer', { type: offer.type, sdp: offer.sdp });
-        }
+        await reconcilePeers();
 
         timer = window.setInterval(() => void poll(), 1000);
         void poll();
       } catch (err) {
         if (cancelled) return;
-        onToast(err instanceof Error ? err.message : 'Could not start the call');
-        hangUp();
+        latestRef.current.onToast(err instanceof Error ? err.message : 'Could not start the call');
+        hangUpRef.current();
       }
     }
 
@@ -635,11 +846,18 @@ export function CallScreen({
     return () => {
       cancelled = true;
       stopEverything();
-      cleanupRef.current = null;
+      teardownRef.current = null;
     };
     // Keyed on the call's identity and this end's role, not on the call object, which the poll
-    // replaces every second — a negotiation is not restarted by a status field changing.
-  }, [call.id, call.kind, call.callerId, me.id, outgoing, hangUp, onToast]);
+    // replaces every second — and not on the participant list, which would tear down every
+    // connection each time somebody joined. The effect below handles those changes instead.
+  }, [call.id, call.kind, call.callerId, me.id, video]);
+
+  /* Somebody joined or left: open or close exactly the connections that changed. This is the
+     only place the mesh's shape is decided after the call starts. */
+  useEffect(() => {
+    void reconcileRef.current?.();
+  }, [peerKey]);
 
   const toggleMute = useCallback(() => {
     setMuted((prev) => {
@@ -664,42 +882,76 @@ export function CallScreen({
   const toggleSpeaker = useCallback(() => {
     const next = !speaker;
     setSpeaker(next);
-    /* Best effort. setSinkId needs an output device id, is absent from mobile Safari, and can
-       reject even where it exists — so the toggle moves either way, because that is the only
-       feedback a phone can give. */
-    const el = remoteRef.current as
-      | (HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> })
-      | null;
-    if (!el || typeof el.setSinkId !== 'function') return;
+    /* Best effort, and applied to every element rather than one: setSinkId needs an output
+       device id, is absent from mobile Safari, and can reject even where it exists — so the
+       toggle moves either way, because that is the only feedback a phone can give. */
+    const elements = document.querySelectorAll<HTMLMediaElement>('.call-tile-audio, .call-tile-video');
+    if (!elements.length) return;
     void (async () => {
       try {
-        if (!next) {
-          await el.setSinkId('');
-          return;
+        const sink = !next
+          ? ''
+          : ((
+              await navigator.mediaDevices.enumerateDevices()
+            ).filter((d) => d.kind === 'audiooutput').find((d) => /speaker|default/i.test(d.label))
+              ?.deviceId ?? '');
+        for (const el of Array.from(elements)) {
+          const withSink = el as HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> };
+          if (typeof withSink.setSinkId !== 'function') continue;
+          await withSink.setSinkId(sink).catch(() => undefined);
         }
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const outputs = devices.filter((device) => device.kind === 'audiooutput');
-        const chosen = outputs.find((device) => /speaker|default/i.test(device.label)) ?? outputs[0];
-        if (chosen) await el.setSinkId(chosen.deviceId);
       } catch {
         /* the toggle itself is the fallback */
       }
     })();
   }, [speaker]);
 
-  const video = call.kind === 'video';
-  const status = answeredAt
-    ? `${clock(seconds)}${connected ? '' : ' · connecting'}`
-    : outgoing
+  const waitingForAnyone = others.length === 0;
+  const status = !answeredAt
+    ? outgoing
       ? 'Ringing…'
-      : 'Connecting…';
+      : 'Connecting…'
+    : `${clock(seconds)}${
+        waitingForAnyone
+          ? ' · waiting for others'
+          : livePeers.length === 0
+            ? ' · connecting'
+            : ''
+      }`;
 
   return (
     <div className="call-full call-live">
       <div className={`call-stage${video ? '' : ' voice'}${swapped ? ' swapped' : ''}`}>
-        {/* The remote element is always a video element: for a voice call it is hidden by CSS,
-            and a hidden element still plays, which is what carries the other person's audio. */}
-        <video ref={remoteRef} className="call-remote" autoPlay playsInline />
+        {waitingForAnyone ? (
+          <div className="call-person">
+            <Avatar name={call.peer.displayName} src={call.peer.avatar} size={132} />
+            <p className="call-sub">Waiting for someone to join…</p>
+          </div>
+        ) : (
+          <div className={`call-grid${others.length > 1 ? ' many' : ''}`}>
+            {others.map((p) => {
+              const stream = remotes[p.user.id];
+              return (
+                <div key={p.user.id} className="call-tile">
+                  {/* Sound always comes from an element, even on a voice call — hidden, but in
+                      the tree, because that is what plays them. */}
+                  {stream ? <PeerMedia stream={stream} video={video} /> : null}
+                  {!video || !stream ? (
+                    <div className="call-tile-face">
+                      <Avatar
+                        name={p.user.displayName}
+                        src={p.user.avatar}
+                        size={others.length > 2 ? 54 : 128}
+                      />
+                    </div>
+                  ) : null}
+                  <span className="call-tile-name">{p.user.displayName}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {video ? (
           <button
             type="button"
@@ -709,15 +961,11 @@ export function CallScreen({
           >
             <video ref={localRef} autoPlay playsInline muted />
           </button>
-        ) : (
-          <div className="call-person">
-            <Avatar name={call.peer.displayName} src={call.peer.avatar} size={132} />
-          </div>
-        )}
+        ) : null}
       </div>
 
       <div className="call-top">
-        <b>{call.peer.displayName}</b>
+        <b>{describeCall(call, me.id)}</b>
         <span>{status}</span>
       </div>
 
@@ -751,9 +999,14 @@ export function CallScreen({
             <span>Camera</span>
           </button>
         ) : null}
-        <button type="button" className="call-ctl end" onClick={hangUp} title="Hang up">
+        <button
+          type="button"
+          className="call-ctl end"
+          onClick={hangUp}
+          title={others.length ? 'Hang up' : 'Cancel'}
+        >
           <IconCallEnd size={22} />
-          <span>Hang up</span>
+          <span>{others.length ? 'Hang up' : 'Cancel'}</span>
         </button>
       </div>
     </div>

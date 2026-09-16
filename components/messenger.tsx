@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, post, uploadMedia } from '@/lib/client';
+import { isInvitee } from '@/lib/mesh';
 import type {
   Call,
   ChatRow,
@@ -397,11 +398,18 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
   }, [inCall, pollActiveCall]);
 
   const startCall = useCallback(
-    async (userId: string, kind: 'audio' | 'video') => {
+    async (userIds: string[], kind: 'audio' | 'video') => {
       if (callStarting) return;
+      const wanted = userIds.filter(Boolean);
+      if (!wanted.length) return;
       setCallStarting(true);
       try {
-        const res = await post<{ call: Call }>('/api/calls', { calleeId: userId, kind });
+        /* One id is a one-to-one call and several is a group call. The server tells them apart
+           by the shape of the body rather than by a flag, because they are genuinely different
+           records: a group call has no callee at all. */
+        const body =
+          wanted.length > 1 ? { calleeIds: wanted, kind } : { calleeId: wanted[0], kind };
+        const res = await post<{ call: Call }>('/api/calls', body);
         callRef.current = res.call;
         setCall(res.call);
       } catch (err) {
@@ -1026,9 +1034,12 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
       ) : null}
 
       {/* A call is never a panel: it takes the whole screen, above every sheet, whichever tab
-          happens to be open underneath. The incoming surface is only for the party being
-          called — the caller is already on the call screen, ringing. */}
-      {call && call.status === 'ringing' && call.calleeId === me.id ? (
+          happens to be open underneath. The incoming surface is only for the people being rung —
+          the caller is already on the call screen, ringing.
+          Asked of the participant list rather than of calleeId, because a group call has no
+          callee at all — so the old test was false for every invitee on one, and they would have
+          landed straight on the in-call screen with their microphone open. */}
+      {call && call.status === 'ringing' && isInvitee(call.participants, me.id) ? (
         <IncomingCall call={call} onAccept={acceptIncoming} onDecline={declineIncoming} />
       ) : call ? (
         <CallScreen me={me} call={call} onEnded={callEnded} onToast={flash} />
