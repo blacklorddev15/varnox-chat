@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { UnauthorizedError } from './auth';
+import { ensureSchema } from './migrate';
 
 export function ok(data: unknown, status = 200) {
   return NextResponse.json(data, {
@@ -26,6 +27,10 @@ function schemaDrift(err: unknown): boolean {
 }
 
 export async function handle(fn: () => Promise<Response>): Promise<Response> {
+  // Reconcile the schema before serving (a no-op once this process has done it). Without
+  // this, a deploy that lands ahead of its migration produces a scatter of 500s that each
+  // look like an unrelated bug.
+  await ensureSchema();
   try {
     return await fn();
   } catch (err) {

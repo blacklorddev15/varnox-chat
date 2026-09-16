@@ -1,3 +1,4 @@
+import { ensureSchema } from '@/lib/migrate';
 import { q } from '@/lib/pg';
 
 export const dynamic = 'force-dynamic';
@@ -19,6 +20,10 @@ const REQUIRED_COLUMNS: { table: string; column: string }[] = [
 ];
 
 export async function GET() {
+  // Let the app close the gap first, then report what the database actually looks like
+  // afterwards — so a 200 here means "aligned", not "aligned once someone runs SQL".
+  const migration = await ensureSchema();
+
   try {
     const tables = await q<{ table_name: string }>(
       `select table_name from information_schema.tables
@@ -45,10 +50,16 @@ export async function GET() {
 
     return Response.json(
       ready
-        ? { ok: true, schema: 'up to date' }
+        ? {
+            ok: true,
+            schema: 'up to date',
+            ...(migration.applied.length ? { autoApplied: migration.applied } : {}),
+            ...(migration.failed ? { autoMigrateFailed: migration.failed } : {}),
+          }
         : {
             ok: false,
             missing,
+            autoMigrateFailed: migration.failed ?? undefined,
             fix: 'Run the migration: npm run db:apply — or paste db/schema.sql into your database console.',
           },
       { status: ready ? 200 : 503, headers: { 'Cache-Control': 'no-store' } }

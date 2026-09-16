@@ -119,6 +119,25 @@ npm run dev                  # http://localhost:3000
 # the code is printed to the terminal running `npm run dev`.
 ```
 
+## Deploys and migrations
+
+A Vercel deploy and a database migration are two separate acts, and nothing stops them
+getting out of step. When that happened here, the symptoms looked like several unrelated
+bugs at once: the display picture stopped saving, sign-up failed, email sign-in errored, and
+— least obviously — signing in with a *correct* password failed while a wrong password still
+returned a healthy-looking 401.
+
+Two things guard against it now:
+
+- **The app reconciles the idempotent part of the schema itself**, once per process, on the
+  first request it serves (`lib/migrate.ts`). Adding a column or a table needs no manual
+  step; every statement is `if not exists`, so a current database is left alone. Data
+  migrations and anything destructive stay in `db/schema.sql`, run deliberately.
+  Set `AUTO_MIGRATE=0` to switch this off and manage the schema by hand.
+- **`GET /api/health`** reports the truth: 200 with `autoApplied` naming what it fixed, or
+  503 naming what is still missing. A driver error for an unknown column or table is
+   translated into "This server needs a database migration" instead of a bare 500.
+
 ## Environment variables
 
 | Name | Required | Purpose |
@@ -132,6 +151,7 @@ npm run dev                  # http://localhost:3000
 | `MESSAGEBIRD_API_KEY`, `MESSAGEBIRD_ORIGINATOR` | for MessageBird | MessageBird credentials |
 | `GENERIC_SMS_URL`, `GENERIC_SMS_TOKEN`, `GENERIC_SMS_BODY` | for generic | Any JSON SMS gateway; `{to}` and `{text}` are substituted into the body |
 | `SMS_CODE_PEPPER` | no | Extra secret for hashing codes at rest; falls back to `SESSION_SECRET` |
+| `AUTO_MIGRATE` | no | `0` disables the app reconciling the schema on first request; see *Deploys and migrations* |
 
 With neither `SMS_PROVIDER` nor `SMS_DEV_MODE` set, the server says so instead of pretending a
 code was sent, so a half-configured deployment fails loudly rather than locking everyone out.
@@ -148,6 +168,7 @@ when opening the pool — you can paste Neon's string in verbatim.
 | `POST` | `/api/auth/logout` | Sign out |
 | `POST` | `/api/auth/otp/start` | Send a login code to a phone number (throttled per number and per IP) |
 | `POST` | `/api/auth/otp/verify` | Check the code, sign in, and create the account if the number is new |
+| `GET` | `/api/health` | Whether the database matches the code; names anything missing (503 when it does not) |
 | `GET` / `PATCH` | `/api/me` | Read or update your profile |
 | `GET` | `/api/users?q=` | Find people by username (blocked accounts are hidden) |
 | `GET` / `PATCH` | `/api/settings` | Wallpaper, notifications, privacy, chat prefs, blocked list |
