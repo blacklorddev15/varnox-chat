@@ -1,6 +1,7 @@
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
-import { normalisePhone } from '@/lib/phone';
-import { startOtp } from '@/lib/otp';
+import { isPhoneBlocked } from '@/lib/db';
+import { formatPhone, normalisePhone } from '@/lib/phone';
+import { OTP_RESEND_MS, OTP_TTL_MS, startOtp } from '@/lib/otp';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,6 +35,26 @@ export async function POST(req: Request) {
     const body = await readJsonBody<Body>(req);
     const phone = normalisePhone(clean(body.phone, 24));
     if (!phone) return bad('Enter a valid phone number, including the country code');
+
+    /**
+     * A blocked number gets no code and the same reply as anybody else.
+     *
+     * The reply matters more than the block here. Answering differently would turn this endpoint
+     * into a way to ask whether a particular number is blocked, one number at a time — the same
+     * reason the response below never says whether an account already exists. So nothing is sent,
+     * nothing is recorded, and the shape of the answer is the one a real send produces.
+     *
+     * The numbers are the declared TTL and cooldown rather than values read back from a code row,
+     * because there is no code row. They are what a real send would have said.
+     */
+    if (await isPhoneBlocked(phone)) {
+      return ok({
+        sent: true,
+        to: formatPhone(phone),
+        expiresInSec: Math.round(OTP_TTL_MS / 1000),
+        resendInSec: Math.round(OTP_RESEND_MS / 1000),
+      });
+    }
 
     const result = await startOtp(phone, clientIp(req));
     if (!result.ok) return bad(result.error, result.status);

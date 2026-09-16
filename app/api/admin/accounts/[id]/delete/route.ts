@@ -1,6 +1,6 @@
 import { requireAdmin } from '@/lib/auth';
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
-import { deleteAccount } from '@/lib/db';
+import { deleteAccount, getUser, recordAdminAction } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,9 +36,24 @@ export async function POST(req: Request, ctx: Ctx) {
     const typed = clean(body.username, 40);
     if (!typed) return bad("Type the account's username to confirm");
 
+    // Read before deleting, so the audit row names the account as it was. The row survives a soft
+    // delete, but the name is what makes the entry readable years later, and reading it first
+    // means the entry cannot depend on that staying true.
+    const target = await getUser(id);
+
     const done = await deleteAccount(id, typed);
     // One answer for a wrong username and an already-deleted account, so neither can be probed.
     if (!done) return bad('That does not match their username', 403);
+
+    await recordAdminAction({
+      actor: admin,
+      action: 'delete',
+      targetId: id,
+      // `typed` is the fallback and not a guess: deleteAccount only returned true because it
+      // matched this account's username.
+      targetName: target ? target.displayName || target.username : typed,
+      detail: null,
+    });
 
     return ok({ deleted: true });
   });

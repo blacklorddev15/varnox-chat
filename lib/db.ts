@@ -3542,6 +3542,338 @@ export async function listAccountsForAdmin(
   }));
 }
 
+/* ── owner actions ─────────────────────────────────────────────────────────── */
+
+export type AdminAuditEntry = {
+  id: number;
+  actorName: string;
+  action: string;
+  targetId: string;
+  targetName: string;
+  detail: string | null;
+  at: number;
+};
+
+/**
+ * Record one owner action.
+ *
+ * Called after the action has already succeeded, never before. A log written first would claim
+ * things happened that did not, and a record that is wrong in that direction is worse than no
+ * record at all — it is believed, and it is exactly the thing anybody would consult to find out
+ * what happened.
+ *
+ * The actor's name is copied rather than joined, for the same reason a report snapshots its
+ * target: a name that is later changed or removed must not rewrite history.
+ */
+export async function recordAdminAction(entry: {
+  actor: User;
+  action: string;
+  targetId: string;
+  targetName: string;
+  detail?: string | null;
+}): Promise<void> {
+  await q(
+    `insert into vx_admin_audit
+       (actor_id, actor_name, action, target_id, target_name, detail, at)
+     values ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      entry.actor.id,
+      entry.actor.displayName || entry.actor.username,
+      entry.action,
+      entry.targetId,
+      entry.targetName,
+      entry.detail ?? null,
+      Date.now(),
+    ]
+  );
+}
+
+/** The newest first, which is the only order this is ever read in. */
+export async function listAdminAudit(limit = 50): Promise<AdminAuditEntry[]> {
+  const rows = await q<{
+    id: number;
+    actor_name: string;
+    action: string;
+    target_id: string;
+    target_name: string;
+    detail: string | null;
+    at: number;
+  }>(
+    `select id, actor_name, action, target_id, target_name, detail, at
+       from vx_admin_audit
+      order by at desc, id desc
+      limit $1`,
+    [Math.max(1, Math.min(200, limit))]
+  );
+  return rows.map((r) => ({
+    id: Number(r.id),
+    actorName: r.actor_name,
+    action: r.action,
+    targetId: r.target_id,
+    targetName: r.target_name,
+    detail: r.detail ?? null,
+    at: Number(r.at),
+  }));
+}
+
+/* ── blocked numbers ───────────────────────────────────────────────────────── */
+
+/**
+ * Is this number barred from signing up or signing in?
+ *
+ * Keyed through phoneKey so the answer does not depend on how the number was typed. Asked with a
+ * direct query rather than cached: a block that takes a few seconds to bite is not a block, and
+ * this is on the signup path where the answer is wanted once, not repeatedly.
+ */
+export async function isPhoneBlocked(phone: string): Promise<boolean> {
+  const key = phoneKey(phone);
+  if (!key) return false;
+  const rows = await q<{ phone: string }>(
+    `select phone from vx_blocked_phones where phone = $1 limit 1`,
+    [key]
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Block a number.
+ *
+ * `on conflict ... do update` rather than `do nothing`, because blocking an already-blocked
+ * number with a new reason should record the new reason — the second reason is usually the one
+ * that came from a report, and losing it would be losing the point of the block.
+ */
+export async function blockPhone(
+  phone: string,
+  reason: string | null,
+  blockedBy: string
+): Promise<boolean> {
+  const key = phoneKey(phone);
+  if (!key) return false;
+  await q(
+    `insert into vx_blocked_phones (phone, reason, blocked_by, at)
+     values ($1, $2, $3, $4)
+     on conflict (phone) do update
+       set reason = excluded.reason, blocked_by = excluded.blocked_by, at = excluded.at`,
+    [key, reason, blockedBy, Date.now()]
+  );
+  return true;
+}
+
+/** Returns whether a row was actually removed, so the caller cannot report a no-op as success. */
+export async function unblockPhone(phone: string): Promise<boolean> {
+  const key = phoneKey(phone);
+  if (!key) return false;
+  const rows = await q<{ phone: string }>(
+    `delete from vx_blocked_phones where phone = $1 returning phone`,
+    [key]
+  );
+  return rows.length > 0;
+}
+
+export type BlockedPhone = {
+  phone: string;
+  reason: string | null;
+  blockedBy: string;
+  at: number;
+};
+
+export async function listBlockedPhones(limit = 100): Promise<BlockedPhone[]> {
+  const rows = await q<{ phone: string; reason: string | null; blocked_by: string; at: number }>(
+    `select phone, reason, blocked_by, at
+       from vx_blocked_phones
+      order by at desc
+      limit $1`,
+    [Math.max(1, Math.min(500, limit))]
+  );
+  return rows.map((r) => ({
+    phone: r.phone,
+    reason: r.reason ?? null,
+    blockedBy: r.blocked_by,
+    at: Number(r.at),
+  }));
+}
+
+/* ── reports ───────────────────────────────────────────────────────────────── */
+
+export type ReportKind = 'user' | 'group' | 'message';
+
+export type Report = {
+  id: number;
+  reporterId: string;
+  kind: string;
+  targetId: string;
+  targetName: string;
+  reason: string;
+  note: string | null;
+  status: string;
+  handledBy: string | null;
+  handledAt: number | null;
+  at: number;
+};
+
+/**
+ * How many open reports one account may have before it is told to wait.
+ *
+ * A cap rather than a counter with a window, because the thing worth preventing is not a burst —
+ * it is one account filling the queue with noise so that the real reports stop being read. The
+ * number is generous on purpose: somebody reporting a bad group should be able to report the
+ * people in it too.
+ */
+const MAX_OPEN_REPORTS = 20;
+
+/**
+ * File a report, or discover it is already filed.
+ *
+ * The duplicate check is inside the insert rather than before it — `where not exists` — so two
+ * requests arriving together cannot both pass a separate check and both insert. A second press of
+ * the same button is the expected case, not an error, so this returns the existing state rather
+ * than failing.
+ */
+export async function createReport(input: {
+  reporterId: string;
+  kind: ReportKind;
+  targetId: string;
+  targetName: string;
+  reason: string;
+  note: string | null;
+}): Promise<{ created: boolean; id: number | null; open: number; tooMany: boolean }> {
+  const already = await q<{ n: number }>(
+    `select count(*)::int as n from vx_reports where reporter_id = $1 and status = 'open'`,
+    [input.reporterId]
+  );
+  const open = Number(already[0]?.n ?? 0);
+  if (open >= MAX_OPEN_REPORTS) return { created: false, id: null, open, tooMany: true };
+
+  const rows = await q<{ id: number }>(
+    `insert into vx_reports
+       (reporter_id, kind, target_id, target_name, reason, note, status, at)
+     select $1, $2, $3, $4, $5, $6, 'open', $7
+      where not exists (
+              select 1 from vx_reports
+               where reporter_id = $1 and target_id = $3 and status = 'open'
+            )
+     returning id`,
+    [
+      input.reporterId,
+      input.kind,
+      input.targetId,
+      input.targetName,
+      input.reason,
+      input.note,
+      Date.now(),
+    ]
+  );
+
+  return {
+    created: rows.length > 0,
+    id: rows[0] ? Number(rows[0].id) : null,
+    open,
+    tooMany: false,
+  };
+}
+
+/** The queue: open reports first, newest first within each. */
+export async function listReports(only: 'open' | 'all' = 'open', limit = 100): Promise<Report[]> {
+  const rows = await q<{
+    id: number;
+    reporter_id: string;
+    kind: string;
+    target_id: string;
+    target_name: string;
+    reason: string;
+    note: string | null;
+    status: string;
+    handled_by: string | null;
+    handled_at: number | null;
+    at: number;
+  }>(
+    `select id, reporter_id, kind, target_id, target_name, reason, note,
+            status, handled_by, handled_at, at
+       from vx_reports
+      where ($1 = 'all' or status = 'open')
+      order by (status = 'open') desc, at desc
+      limit $2`,
+    [only, Math.max(1, Math.min(500, limit))]
+  );
+  return rows.map((r) => ({
+    id: Number(r.id),
+    reporterId: r.reporter_id,
+    kind: r.kind,
+    targetId: r.target_id,
+    targetName: r.target_name,
+    reason: r.reason,
+    note: r.note ?? null,
+    status: r.status,
+    handledBy: r.handled_by ?? null,
+    handledAt: r.handled_at == null ? null : Number(r.handled_at),
+    at: Number(r.at),
+  }));
+}
+
+/** One report by id. Read directly rather than by scanning the queue to find it. */
+export async function getReport(id: number): Promise<Report | null> {
+  if (!Number.isInteger(id) || id < 1) return null;
+  const rows = await q<{
+    id: number;
+    reporter_id: string;
+    kind: string;
+    target_id: string;
+    target_name: string;
+    reason: string;
+    note: string | null;
+    status: string;
+    handled_by: string | null;
+    handled_at: number | null;
+    at: number;
+  }>(
+    `select id, reporter_id, kind, target_id, target_name, reason, note,
+            status, handled_by, handled_at, at
+       from vx_reports
+      where id = $1`,
+    [id]
+  );
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    id: Number(r.id),
+    reporterId: r.reporter_id,
+    kind: r.kind,
+    targetId: r.target_id,
+    targetName: r.target_name,
+    reason: r.reason,
+    note: r.note ?? null,
+    status: r.status,
+    handledBy: r.handled_by ?? null,
+    handledAt: r.handled_at == null ? null : Number(r.handled_at),
+    at: Number(r.at),
+  };
+}
+
+/**
+ * Close a report.
+ *
+ * `where status = 'open'` so closing a closed report reports that nothing happened, rather than
+ * overwriting who handled it first with whoever looked at it second.
+ */
+export async function closeReport(id: number, handledBy: string): Promise<boolean> {
+  const rows = await q<{ id: number }>(
+    `update vx_reports
+        set status = 'closed', handled_by = $2, handled_at = $3
+      where id = $1 and status = 'open'
+      returning id`,
+    [id, handledBy, Date.now()]
+  );
+  return rows.length > 0;
+}
+
+/** How many reports are still open, for the list response. */
+export async function openReportCount(): Promise<number> {
+  const rows = await q<{ n: number }>(
+    `select count(*)::int as n from vx_reports where status = 'open'`
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
 /* ── the code shown when there is no SMS to send it with ───────────────────── */
 
 /** How long a recorded code stays readable. Matches the code's own life (OTP_TTL_MS). */
