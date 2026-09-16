@@ -5,6 +5,8 @@ import { newId, rand } from './ids';
 import { q } from './pg';
 import { looksLikePhone, phoneKey } from './phone';
 import type {
+  Call,
+  CallSignal,
   Channel,
   ChannelFollower,
   ChannelPost,
@@ -2140,4 +2142,374 @@ export async function getChannelFollowers(
     });
   }
   return followers;
+}
+
+/* ── calls (voice and video) ───────────────────────────────────────────── */
+
+/**
+ * How long a call rings before it counts as missed.
+ *
+ * Nothing sweeps the table when this elapses. Like an expired status, an unanswered call is a
+ * filter applied when it is read, so the window costs no background work and a row that was
+ * never answered cannot outlive it — or block the next call, which it would if 'ringing' alone
+ * meant live.
+ */
+export const CALL_RING_MS = 45_000;
+
+/**
+ * An SDP body is a few kilobytes. Anything far larger is not one, and is not worth storing.
+ *
+ * Exported so the route can reject an oversized payload *before* calling in here. The check
+ * below still stands as a second line of defence, but a throw from here reaches the caller as a
+ * 500 — a validation failure wearing a server-error costume, which reads like a broken deploy
+ * rather than a bad request.
+ */
+export const MAX_SIGNAL_PAYLOAD = 20_000;
+
+type CallRow = {
+  id: string;
+  caller_id: string;
+  callee_id: string;
+  kind: string;
+  status: string;
+  created_at: number;
+  answered_at: number | null;
+  ended_at: number | null;
+  ended_by: string | null;
+};
+
+const CALL_COLUMNS = `c.id, c.caller_id, c.callee_id, c.kind, c.status,
+  c.created_at, c.answered_at, c.ended_at, c.ended_by`;
+
+/**
+ * A row's status as it should be read *now*: a ringing call that has been ringing for longer
+ * than the window is a missed call, whether or not anybody has written that down.
+ */
+function callStatus(status: string, createdAt: number, now: number): Call['status'] {
+  if (status === 'ringing') return createdAt <= now - CALL_RING_MS ? 'missed' : 'ringing';
+  if (status === 'accepted') return 'accepted';
+  if (status === 'declined') return 'declined';
+  if (status === 'missed') return 'missed';
+  return 'ended';
+}
+
+/**
+ * Row to wire shape. The peer is the other party, so neither call screen has to decide which
+ * end it is on, and the derived fields are computed here rather than stored.
+ *
+ * Null when the other account is gone: a call to a user who no longer exists has no name or
+ * picture to draw, and both callers (the live read and the history list) simply drop it.
+ */
+async function toCall(r: CallRow, viewerId: string, now: number): Promise<Call | null> {
+  const peerId = r.caller_id === viewerId ? r.callee_id : r.caller_id;
+  const peer = await getUser(peerId);
+  if (!peer) return null;
+  const settings = await getSettings(peerId);
+  const status = callStatus(r.status, Number(r.created_at), now);
+  const answeredAt = r.answered_at === null ? null : Number(r.answered_at);
+  const endedAt = r.ended_at === null ? null : Number(r.ended_at);
+  return {
+    id: r.id,
+    callerId: r.caller_id,
+    calleeId: r.callee_id,
+    kind: r.kind === 'video' ? 'video' : 'audio',
+    status,
+    createdAt: Number(r.created_at),
+    answeredAt,
+    endedAt,
+    endedBy: r.ended_by ?? null,
+    peer: {
+      ...toPublicUser(peer),
+      // The same projection the updates screen and the follower list apply.
+      avatar: settings.privacy.profilePhoto !== 'nobody' ? peer.avatar : null,
+    },
+    direction: r.caller_id === viewerId ? 'outgoing' : 'incoming',
+    missed: status === 'missed',
+    // A call that was never answered has no duration, which is also what tells the list to
+    // print one at all.
+    durationMs: answeredAt === null ? null : Math.max(0, (endedAt ?? now) - answeredAt),
+  };
+}
+
+/**
+ * What went wrong when a write touched no row, said properly.
+ *
+ * The updates all carry their own authorisation in the WHERE clause, so "no rows" covers four
+ * different situations: no such call, somebody else's call, a call that has already finished,
+ * and a call that has already been answered. Only the row itself can tell them apart, and a
+ * caller that is told the wrong one wastes their time.
+ */
+async function callRefusal(callId: string, userId: string, action: string): Promise<Error> {
+  const rows = await q<{ caller_id: string; callee_id: string; status: string; created_at: number }>(
+    `select caller_id, callee_id, status, created_at from vx_calls where id = $1`,
+    [callId]
+  );
+  const row = rows[0];
+  if (!row) return new Error('Call not found');
+  if (row.caller_id !== userId && row.callee_id !== userId) {
+    return new Error('Forbidden: that call is not yours');
+  }
+  if (row.status === 'ringing' && Number(row.created_at) <= Date.now() - CALL_RING_MS) {
+    return new Error('Forbidden: this call is no longer ringing');
+  }
+  if (row.status === 'accepted') return new Error('Forbidden: this call is already answered');
+  if (row.status !== 'ringing') return new Error('Forbidden: this call has already finished');
+  return new Error(`Forbidden: only the receiver can ${action} a call`);
+}
+
+/**
+ * One call by id, provided the reader is one of its two participants.
+ *
+ * Exported for the signals route: `listCallSignals` filters by participant inside its join, so a
+ * stranger there would otherwise receive an empty list with a 200 — indistinguishable from "the
+ * other side has not sent anything yet", which is a confusing thing to debug at 1 a.m.
+ */
+export async function callFor(callId: string, userId: string): Promise<Call | null> {
+  if (!callId) return null;
+  const rows = await q<CallRow>(
+    `select ${CALL_COLUMNS} from vx_calls c
+      where c.id = $1 and (c.caller_id = $2 or c.callee_id = $2)
+      limit 1`,
+    [callId, userId]
+  );
+  return rows[0] ? toCall(rows[0], userId, Date.now()) : null;
+}
+
+/**
+ * Start a call.
+ *
+ * Three refusals, and all three are enforced by the insert rather than before it: the statement
+ * selects its row from vx_users, so a missing callee inserts nothing, and the `not exists` on
+ * vx_calls means a caller or a callee who is already in a live call inserts nothing either.
+ * Only afterwards, to say *which* refusal it was, does it look anything up.
+ *
+ * A live call here means accepted, or ringing inside its window — the same rule getLiveCall
+ * reads by, so a call that has aged out cannot keep either party busy forever.
+ */
+export async function startCall(
+  callerId: string,
+  calleeId: string,
+  kind: Call['kind']
+): Promise<Call> {
+  if (kind !== 'audio' && kind !== 'video') throw new Error('A call must be audio or video');
+  const now = Date.now();
+  const id = newId('call');
+  const rows = await q<{ id: string }>(
+    `insert into vx_calls (id, caller_id, callee_id, kind, status, created_at)
+     select $1, $2, u.id, $3, 'ringing', $4
+       from vx_users u
+      where u.id = $5
+        and u.id <> $2
+        and not exists (
+          select 1 from vx_calls c
+           where (c.caller_id = $2 or c.callee_id = $2
+                  or c.caller_id = $5 or c.callee_id = $5)
+             and (c.status = 'accepted'
+                  or (c.status = 'ringing' and c.created_at > $6))
+        )
+     returning id`,
+    [id, callerId, kind, now, calleeId, now - CALL_RING_MS]
+  );
+
+  if (!rows.length) {
+    if (callerId === calleeId) throw new Error('Forbidden: you cannot call yourself');
+    const peer = await q<{ id: string }>(`select id from vx_users where id = $1`, [calleeId]);
+    if (!peer.length) throw new Error('That person was not found');
+    const mine = await q<{ id: string }>(
+      `select c.id from vx_calls c
+        where (c.caller_id = $1 or c.callee_id = $1)
+          and (c.status = 'accepted' or (c.status = 'ringing' and c.created_at > $2))
+        limit 1`,
+      [callerId, now - CALL_RING_MS]
+    );
+    throw new Error(
+      mine.length
+        ? 'Forbidden: you are already on a call'
+        : 'Forbidden: that person is already on a call'
+    );
+  }
+
+  const call = await callFor(id, callerId);
+  if (!call) throw new Error('Call not found');
+  return call;
+}
+
+/**
+ * The user's live call, or null.
+ *
+ * Cheap on purpose: it is polled about once a second while a call is up and every few seconds
+ * the rest of the time, because it is what draws the incoming-call surface. A ringing call is
+ * only live inside its 45 second window — the filter is in the WHERE clause, so an unanswered
+ * call ages out of this query on its own.
+ */
+export async function getLiveCall(userId: string): Promise<Call | null> {
+  const now = Date.now();
+  const rows = await q<CallRow>(
+    `select ${CALL_COLUMNS} from vx_calls c
+      where (c.caller_id = $1 or c.callee_id = $1)
+        and (c.status = 'accepted'
+             or (c.status = 'ringing' and c.created_at > $2))
+      order by c.created_at desc
+      limit 1`,
+    [userId, now - CALL_RING_MS]
+  );
+  return rows[0] ? toCall(rows[0], userId, now) : null;
+}
+
+/**
+ * Recent calls either way, newest first, each already resolved from this user's side.
+ *
+ * The peer of a row costs a user and a settings lookup, both cached for a few seconds, so a
+ * list where the same handful of people appear over and over is a handful of queries rather
+ * than one per row.
+ */
+export async function listCallHistory(userId: string, limit = 50): Promise<Call[]> {
+  const capped = Math.max(1, Math.min(200, Math.floor(limit) || 100));
+  const now = Date.now();
+  const rows = await q<CallRow>(
+    `select ${CALL_COLUMNS} from vx_calls c
+      where c.caller_id = $1 or c.callee_id = $1
+      order by c.created_at desc
+      limit $2`,
+    [userId, capped]
+  );
+  const calls: Call[] = [];
+  for (const row of rows) {
+    const call = await toCall(row, userId, now);
+    if (call) calls.push(call);
+  }
+  return calls;
+}
+
+/**
+ * Pick up a call: the callee, while it is still ringing and still inside the window.
+ *
+ * The three conditions are the statement's own WHERE clause rather than a read followed by a
+ * write, so two taps cannot both believe they were the one that answered — the second updates
+ * nothing and is told the call is no longer ringing.
+ */
+export async function acceptCall(callId: string, userId: string): Promise<Call> {
+  const now = Date.now();
+  const rows = await q<{ id: string }>(
+    `update vx_calls
+        set status = 'accepted', answered_at = $3
+      where id = $1 and callee_id = $2 and status = 'ringing' and created_at > $4
+      returning id`,
+    [callId, userId, now, now - CALL_RING_MS]
+  );
+  if (!rows.length) throw await callRefusal(callId, userId, 'accept');
+  const call = await callFor(callId, userId);
+  if (!call) throw new Error('Call not found');
+  return call;
+}
+
+/** Refuse a call: the callee, while it is still ringing. */
+export async function declineCall(callId: string, userId: string): Promise<Call> {
+  const now = Date.now();
+  const rows = await q<{ id: string }>(
+    `update vx_calls
+        set status = 'declined', ended_at = $3, ended_by = $2
+      where id = $1 and callee_id = $2 and status = 'ringing'
+      returning id`,
+    [callId, userId, now]
+  );
+  if (!rows.length) throw await callRefusal(callId, userId, 'decline');
+  const call = await callFor(callId, userId);
+  if (!call) throw new Error('Call not found');
+  return call;
+}
+
+/**
+ * Hang up: either participant, while the call is ringing or up.
+ *
+ * A ringing call that the *caller* gives up on becomes 'missed' rather than 'ended' — nobody
+ * was there to answer it. A call that was picked up is simply 'ended'.
+ */
+export async function endCall(callId: string, userId: string): Promise<Call> {
+  const now = Date.now();
+  const rows = await q<{ id: string }>(
+    `update vx_calls
+        set status = case
+              when status = 'ringing' and caller_id = $2 then 'missed'
+              else 'ended'
+            end,
+            ended_at = $3,
+            ended_by = $2
+      where id = $1
+        and (caller_id = $2 or callee_id = $2)
+        and status in ('ringing', 'accepted')
+      returning id`,
+    [callId, userId, now]
+  );
+  if (!rows.length) throw await callRefusal(callId, userId, 'end');
+  const call = await callFor(callId, userId);
+  if (!call) throw new Error('Call not found');
+  return call;
+}
+
+/**
+ * Post one signal — an offer, an answer or an ICE candidate.
+ *
+ * The participants rule is the insert's own `select ... from vx_calls where ...`, so a
+ * non-participant writes nothing rather than being trusted not to. The status check is there
+ * too: signals for a call that is over are not stored, which keeps the table from growing one
+ * dead conversation per abandoned call.
+ */
+export async function addCallSignal(
+  callId: string,
+  fromId: string,
+  kind: CallSignal['kind'],
+  payload: string
+): Promise<void> {
+  if (kind !== 'offer' && kind !== 'answer' && kind !== 'candidate') {
+    throw new Error('That is not a call signal');
+  }
+  const body = String(payload ?? '');
+  if (!body) throw new Error('An empty call signal cannot be sent');
+  if (body.length > MAX_SIGNAL_PAYLOAD) throw new Error('That call signal is too large');
+
+  const rows = await q<{ seq: number }>(
+    `insert into vx_call_signals (call_id, from_id, kind, payload, created_at)
+     select $1, $2, $3, $4, $5
+       from vx_calls c
+      where c.id = $1
+        and (c.caller_id = $2 or c.callee_id = $2)
+        and c.status in ('ringing', 'accepted')
+     returning seq`,
+    [callId, fromId, kind, body, Date.now()]
+  );
+  if (!rows.length) throw new Error('Forbidden: that call is not yours');
+}
+
+/**
+ * Everything the other side has said since `afterSeq`, oldest first.
+ *
+ * A cursor rather than a "since" timestamp, because two signals can be written in the same
+ * millisecond and a timestamp would then either repeat one or skip one. The visibility rule
+ * is repeated in the join, the same way listChannelPosts repeats it.
+ */
+export async function listCallSignals(
+  callId: string,
+  userId: string,
+  afterSeq = 0
+): Promise<CallSignal[]> {
+  const after = Number.isFinite(afterSeq) ? Math.max(0, Math.floor(afterSeq)) : 0;
+  const rows = await q<{ seq: number; from_id: string; kind: string; payload: string }>(
+    `select s.seq, s.from_id, s.kind, s.payload
+       from vx_call_signals s
+       join vx_calls c on c.id = s.call_id
+      where s.call_id = $1
+        and (c.caller_id = $2 or c.callee_id = $2)
+        and s.seq > $3
+      order by s.seq asc
+      limit 250`,
+    [callId, userId, after]
+  );
+  return rows.map((row) => ({
+    seq: Number(row.seq),
+    kind:
+      row.kind === 'offer' ? 'offer' : row.kind === 'answer' ? 'answer' : 'candidate',
+    fromId: row.from_id,
+    payload: row.payload,
+  }));
 }

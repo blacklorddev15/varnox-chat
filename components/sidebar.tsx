@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatRow, PublicUser, UserSettings } from '@/lib/types';
 import { listStamp, shortPreview } from '@/lib/format';
 import { Avatar } from './avatar';
+import { CallsScreen } from './calls';
 import { ChannelsScreen } from './channels';
 import { UpdatesScreen } from './updates';
 import {
@@ -22,6 +23,7 @@ import {
   IconMic,
   IconMoon,
   IconNewChat,
+  IconPhone,
   IconPin,
   IconSearch,
   IconSettings,
@@ -39,8 +41,11 @@ export function Sidebar({
   selectedId,
   filter,
   tab,
+  recents,
+  callStarting,
   onTab,
   onToast,
+  onCall,
   onFilter,
   onSelectChat,
   onNewChat,
@@ -62,9 +67,14 @@ export function Sidebar({
   selectedId: string | null;
   filter: 'all' | 'unread' | 'groups';
   /** Which phone tab the sidebar is showing. Ignored on wide screens. */
-  tab: 'chats' | 'updates' | 'channels';
-  onTab: (tab: 'chats' | 'updates' | 'channels') => void;
+  tab: 'chats' | 'updates' | 'channels' | 'calls';
+  /** People this account already has a direct chat with, offered first by the call picker. */
+  recents: PublicUser[];
+  /** A call is being placed, so the Calls screen holds its buttons still. */
+  callStarting: boolean;
+  onTab: (tab: 'chats' | 'updates' | 'channels' | 'calls') => void;
   onToast: (message: string) => void;
+  onCall: (userId: string, kind: 'audio' | 'video') => void;
   onFilter: (f: 'all' | 'unread' | 'groups') => void;
   onSelectChat: (id: string) => void;
   onNewChat: () => void;
@@ -357,12 +367,20 @@ export function Sidebar({
         <UpdatesScreen me={me} onBack={() => onTab('chats')} onToast={onToast} />
       ) : tab === 'channels' ? (
         <ChannelsScreen onBack={() => onTab('chats')} onToast={onToast} />
+      ) : tab === 'calls' ? (
+        <CallsScreen
+          recents={recents}
+          starting={callStarting}
+          onBack={() => onTab('chats')}
+          onToast={onToast}
+          onCall={onCall}
+        />
       ) : (
         chatsTab
       )}
 
       {/* Phone layout only: the tab bar is hidden on wide screens, which keep the header and
-          always show the chat list. Calls joins it later, with a tab of its own. */}
+          always show the chat list. */}
       <nav className="tab-bar">
         <button
           type="button"
@@ -387,6 +405,14 @@ export function Sidebar({
         >
           <IconChannel size={21} />
           <span>Channels</span>
+        </button>
+        <button
+          type="button"
+          className={tab === 'calls' ? 'on' : ''}
+          onClick={() => onTab('calls')}
+        >
+          <IconPhone size={21} />
+          <span>Calls</span>
         </button>
       </nav>
     </aside>

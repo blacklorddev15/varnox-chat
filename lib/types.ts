@@ -335,3 +335,48 @@ export type ChannelFollower = {
   user: PublicUser;
   followedAt: number;
 };
+
+/**
+ * One 1:1 call, as the signed-in user sees it.
+ *
+ * `peer` is always the *other* party, so nothing on the two call screens has to work out which
+ * end it is on. `direction`, `missed` and `durationMs` are derived on every read rather than
+ * stored, for the same reason `Channel.isOwner` and a status's `expiresAt` are: a derived value
+ * cannot drift away from the row it describes.
+ *
+ * `status` is 'ringing' while it is being offered, 'accepted' once it is up, and 'declined',
+ * 'ended' or 'missed' once it is over. A 'ringing' row older than the 45 second window is
+ * reported as 'missed' rather than 'ringing' — that derivation happens on read, so no
+ * background job is needed to age a call out and a stale row cannot block the next one.
+ */
+export type Call = {
+  id: string;
+  callerId: string;
+  calleeId: string;
+  kind: 'audio' | 'video';
+  status: 'ringing' | 'accepted' | 'declined' | 'ended' | 'missed';
+  createdAt: number;
+  answeredAt: number | null;
+  endedAt: number | null;
+  endedBy: string | null;
+  peer: PublicUser;
+  direction: 'incoming' | 'outgoing';
+  /** The call was never answered. */
+  missed: boolean;
+  /** How long the call was up, or null if it never was. */
+  durationMs: number | null;
+};
+
+/**
+ * One message on the signalling channel: the offer and answer that negotiate the session, and
+ * the ICE candidates that find a route between the two browsers.
+ *
+ * `seq` is the cursor a poll asks from, so a reader only ever sees what arrived after the last
+ * signal it handled.
+ */
+export type CallSignal = {
+  seq: number;
+  kind: 'offer' | 'answer' | 'candidate';
+  fromId: string;
+  payload: string;
+};
