@@ -45,35 +45,48 @@ export async function POST(req: Request) {
       return bad('That phone number is already registered', 409);
     }
 
-    // The address is part of the account now: it is the only way back in if the number is
-    // lost, so it is required rather than optional. It is stored lowercased and checked
-    // case-insensitively, the same rule the unique index enforces.
+    // The address is optional during signup and can be added later from the profile screen.
+    // When one is given it is stored lowercased and checked case-insensitively, the same
+    // rule the unique index enforces.
     const rawEmail = clean(body.email, 254);
-    if (!rawEmail) return bad('Enter your email address');
-    const email = normaliseEmail(rawEmail);
-    if (!email) return bad('Enter a valid email address, for example you@example.com');
-    if (await emailTaken(email)) return bad('That email is already registered', 409);
-
-    const requested = clean(body.username, 24).toLowerCase().replace(/\s+/g, '');
-    let wanted = requested || (phone ? handleFromPhone(phone) : '');
-    if (!wanted) return bad('Enter a phone number to register');
-    if (!/^[a-z0-9._]{3,24}$/.test(wanted)) {
-      return bad('Handle must be 3-24 characters: letters, numbers, dot or underscore');
+    let email: string | null = null;
+    if (rawEmail) {
+      email = normaliseEmail(rawEmail);
+      if (!email) return bad('Enter a valid email address, for example you@example.com');
+      if (await emailTaken(email)) return bad('That email is already registered', 409);
     }
 
-    if ((await usernameTaken(wanted)) || (await getUserByUsername(wanted))) {
-      // An explicitly chosen handle must stay exactly as asked for, because that is
-      // also how those accounts sign in. Handles derived from a phone number are
-      // internal, so a free variant can be picked silently.
-      if (requested) return bad('That username is already taken', 409);
-      let candidate = '';
-      for (let i = 0; i < 5; i++) {
-        candidate = `${wanted.slice(0, 18)}${rand(3)}`.slice(0, 24);
-        if (!(await usernameTaken(candidate)) && !(await getUserByUsername(candidate))) break;
-        candidate = '';
+    // The username is the handle people search for, so a chosen one is validated explicitly
+    // and a taken one is rejected outright rather than silently replaced.
+    const requested = clean(body.username, 24).trim().toLowerCase();
+    let wanted = requested;
+    if (requested) {
+      if (!/^[a-z0-9._]{3,20}$/.test(requested)) {
+        return bad('Username must be 3-20 characters: letters, numbers, dot or underscore');
       }
-      if (!candidate) return bad('That handle is already taken', 409);
-      wanted = candidate;
+      if ((await usernameTaken(requested)) || (await getUserByUsername(requested))) {
+        return bad('That username is already taken', 409);
+      }
+      wanted = requested;
+    } else {
+      wanted = phone ? handleFromPhone(phone) : '';
+      if (!wanted) return bad('Enter a phone number to register');
+      if (!/^[a-z0-9._]{3,24}$/.test(wanted)) {
+        return bad('Handle must be 3-24 characters: letters, numbers, dot or underscore');
+      }
+      if ((await usernameTaken(wanted)) || (await getUserByUsername(wanted))) {
+        // A handle derived from a phone number is internal, so a free variant can be
+        // picked silently. An explicitly chosen handle must stay exactly as asked for,
+        // because that is also how those accounts sign in.
+        let candidate = '';
+        for (let i = 0; i < 5; i++) {
+          candidate = `${wanted.slice(0, 18)}${rand(3)}`.slice(0, 24);
+          if (!(await usernameTaken(candidate)) && !(await getUserByUsername(candidate))) break;
+          candidate = '';
+        }
+        if (!candidate) return bad('That handle is already taken', 409);
+        wanted = candidate;
+      }
     }
 
     const user: User = {
@@ -81,7 +94,11 @@ export async function POST(req: Request) {
       username: wanted,
       phone,
       email,
-      displayName: clean(body.displayName, 40) || (phone ? formatPhone(phone) : wanted),
+      // A username someone chose is the friendliest thing to show next to their messages; a
+      // generated handle is not, so that case falls back to the number instead.
+      displayName:
+        clean(body.displayName, 40) ||
+        (clean(body.username, 24) ? wanted : phone ? formatPhone(phone) : wanted),
       about: 'Hey there! I am using Varnox.',
       avatar: null,
       pwHash: hashPassword(password),
