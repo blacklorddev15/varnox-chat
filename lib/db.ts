@@ -240,7 +240,19 @@ export async function searchUsers(term: string, excludeId: string): Promise<Publ
   }
 
   const users = await Promise.all(ids.slice(0, 12).map((id) => getUser(id)));
-  return users.filter((u): u is User => Boolean(u)).map(toPublicUser);
+  // A deleted account is not shown again, however it was found — by handle, by name, or by
+  // whatever mixture the queries above turn up. One rule here rather than a condition inside
+  // each query, where two of them could disagree.
+  const alive = await q<{ id: string }>(
+    `select id from vx_users where id = any($1::text[]) and deleted_at is null`,
+    [ids.slice(0, 12)]
+  );
+  const live = new Set(alive.map((r) => r.id));
+
+  return users
+    .filter((u): u is User => Boolean(u))
+    .filter((u) => live.has(u.id))
+    .map(toPublicUser);
 }
 
 /**
@@ -3252,6 +3264,55 @@ export async function listBotThread(
     mediaBytes: r.byte_size === null ? null : Number(r.byte_size),
     at: toEpochMs(r.created_at),
   }));
+}
+
+/* ── deleted accounts ──────────────────────────────────────────────────────── */
+
+/**
+ * Has this account been deleted?
+ *
+ * Asked rather than carried on the user row, so it costs nothing at the hundred places that
+ * build a User and cannot be forgotten at any of them. Cached by userCache, because the session
+ * check runs on every authenticated request.
+ */
+export async function isAccountDeleted(userId: string): Promise<boolean> {
+  const rows = await q<{ deleted_at: number | null }>(
+    `select deleted_at from vx_users where id = $1`,
+    [userId]
+  );
+  return rows[0]?.deleted_at != null;
+}
+
+/**
+ * Delete an account.
+ *
+ * `expected` must be the account's own username. Deleting is irreversible from the app and
+ * takes somebody's whole history with it, so it is confirmed by typing the handle rather than
+ * by tapping a button twice — the same reason the button is buried a screen deep.
+ *
+ * The phone number is released so the person can register again; the handle is deliberately
+ * NOT, because a freed handle is an invitation to impersonate somebody who just left.
+ *
+ * Nothing else is touched. Messages stay in the threads they were sent to, because they are
+ * not only this account's to delete — see the note on vx_users.deleted_at.
+ */
+export async function deleteAccount(userId: string, expected: string): Promise<boolean> {
+  const rows = await q<{ username: string }>(
+    `select username from vx_users where id = $1 and deleted_at is null`,
+    [userId]
+  );
+  const row = rows[0];
+  if (!row) return false;
+  if (row.username.toLowerCase() !== String(expected ?? '').trim().toLowerCase()) return false;
+
+  await q(
+    `update vx_users
+        set deleted_at = $2,
+            phone      = null
+      where id = $1 and deleted_at is null`,
+    [userId, Date.now()]
+  );
+  return true;
 }
 
 /* ── the code shown when there is no SMS to send it with ───────────────────── */

@@ -1,6 +1,13 @@
 import { publicUser, setSessionCookie, verifyPassword } from '@/lib/auth';
 import { bad, clean, clientIp, deviceLabel, handle, ok, readJsonBody, userAgent } from '@/lib/api';
-import { createDevice, getUserByEmail, getUserByPhone, getUserByUsername, saveUser } from '@/lib/db';
+import {
+  createDevice,
+  getUserByEmail,
+  getUserByPhone,
+  getUserByUsername,
+  isAccountDeleted,
+  saveUser,
+} from '@/lib/db';
 import { normaliseEmail } from '@/lib/email';
 import { normalisePhone } from '@/lib/phone';
 
@@ -32,6 +39,12 @@ export async function POST(req: Request) {
       (await getUserByUsername(raw));
 
     if (!user || !verifyPassword(password, user.pwHash)) {
+      return bad('Incorrect phone number, email or password', 401);
+    }
+
+    // A deleted account answers exactly like a wrong password. Saying "this account was deleted"
+    // would confirm a number or handle that somebody has just walked away from.
+    if (await isAccountDeleted(user.id)) {
       return bad('Incorrect phone number, email or password', 401);
     }
 

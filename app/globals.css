@@ -3123,3 +3123,31 @@ html[data-theme='dark'] .bubble.tail-out {
   font-size: 13px;
   color: var(--brand);
 }
+
+/* Deleting an account. Set apart from the other settings rows: it is the one action here that
+   cannot be undone, so it gets its own surface rather than another tap target. */
+.danger-confirm {
+  margin: 6px 0 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--danger, #c0392b);
+  border-radius: 10px;
+}
+.danger-confirm input {
+  width: 100%;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.row-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.btn.danger {
+  background: var(--danger, #c0392b);
+  color: #fff;
+}
+.hint.error {
+  color: var(--danger, #c0392b);
+}
