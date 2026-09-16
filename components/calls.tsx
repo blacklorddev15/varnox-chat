@@ -921,7 +921,7 @@ export function CallScreen({
 
   return (
     <div className="call-full call-live">
-      <div className={`call-stage${video ? '' : ' voice'}`}>
+      <div className={`call-stage${video ? '' : ' voice'}${swapped ? ' swapped' : ''}`}>
         {waitingForAnyone ? (
           <div className="call-person">
             <Avatar name={call.peer.displayName} src={call.peer.avatar} size={132} />

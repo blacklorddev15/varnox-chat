@@ -3191,3 +3191,14 @@ html[data-theme='dark'] .bubble.tail-out {
   font-size: 13px;
   color: var(--muted);
 }
+/* Swap, with tiles instead of a single remote element: the local picture takes the stage and
+   everybody else shrinks to a strip along the bottom. The same .swapped class the one-to-one
+   stage used, so the rule reads the same way in both — only the thing being shrunk changed. */
+.call-stage.swapped .call-grid {
+  inset: auto 14px 14px 14px;
+  height: 120px;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  border-radius: 12px;
+  overflow: hidden;
+}
