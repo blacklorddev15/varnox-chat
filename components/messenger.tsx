@@ -40,7 +40,12 @@ const DEFAULT_SETTINGS: UserSettings = {
   userId: '',
   wallpaper: 'doodle',
   notifications: true,
-  privacy: { lastSeen: 'everyone', profilePhoto: 'everyone', readReceipts: true },
+  privacy: {
+    lastSeen: 'everyone',
+    profilePhoto: 'everyone',
+    readReceipts: true,
+    statusPrivacy: 'everyone',
+  },
   chatPrefs: {},
   blocked: [],
   at: 0,
@@ -104,6 +109,8 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [filter, setFilter] = useState<'all' | 'unread' | 'groups'>('all');
   const [forwardIds, setForwardIds] = useState<string[]>([]);
+  /** Which bottom tab the phone layout is on. Wide screens ignore it and show chats. */
+  const [tab, setTab] = useState<'chats' | 'updates'>('chats');
 
   const lastAtRef = useRef(0);
   const selectedRef = useRef<string | null>(null);
@@ -758,6 +765,9 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
         ready={listReady}
         selectedId={selectedId}
         filter={filter}
+        tab={tab}
+        onTab={setTab}
+        onToast={flash}
         onFilter={setFilter}
         onSelectChat={openChat}
         onNewChat={() => setPanel('new-chat')}

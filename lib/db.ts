@@ -17,6 +17,9 @@ import type {
   PublicUser,
   Reaction,
   StarredItem,
+  Status,
+  StatusAuthor,
+  StatusViewer,
   User,
   UserSettings,
 } from './types';
@@ -786,7 +789,13 @@ export function defaultSettings(userId: string): UserSettings {
     userId,
     wallpaper: 'doodle',
     notifications: true,
-    privacy: { lastSeen: 'everyone', profilePhoto: 'everyone', readReceipts: true },
+    privacy: {
+      lastSeen: 'everyone',
+      profilePhoto: 'everyone',
+      readReceipts: true,
+      // Updates are visible to every signed-in user unless the account says otherwise.
+      statusPrivacy: 'everyone',
+    },
     chatPrefs: {},
     blocked: [],
     at: Date.now(),
@@ -1497,4 +1506,246 @@ export async function redeemLinkCode(
 
   const device = await createDevice(row.user_id, agent);
   return { userId: row.user_id, deviceId: device.id };
+}
+
+/* ── updates (status) ──────────────────────────────────────────────────── */
+
+/** How long an update stays visible. Nothing sweeps the table: expiry is a filter, not a job. */
+export const STATUS_TTL_MS = 24 * 60 * 60 * 1000;
+
+type StatusRow = {
+  id: string;
+  user_id: string;
+  kind: string;
+  text: string | null;
+  media_url: string | null;
+  bg: string | null;
+  created_at: number;
+  expires_at: number;
+  seen: boolean;
+  view_count: number;
+};
+
+function toStatus(r: StatusRow): Status {
+  return {
+    id: r.id,
+    userId: r.user_id,
+    kind: r.kind === 'image' ? 'image' : 'text',
+    text: r.text ?? null,
+    mediaUrl: r.media_url ?? null,
+    bg: r.bg ?? null,
+    createdAt: Number(r.created_at),
+    expiresAt: Number(r.expires_at),
+    seen: Boolean(r.seen),
+    viewCount: Number(r.view_count ?? 0),
+  };
+}
+
+/**
+ * `seen` and the view count come from vx_status_views joined per row, so one query answers
+ * the whole feed. Counting for every row rather than only the viewer's own keeps the SQL
+ * simple; the count is blanked out below for updates that are not the viewer's.
+ */
+const STATUS_COLUMNS = `s.*,
+  exists (select 1 from vx_status_views v
+           where v.status_id = s.id and v.viewer_id = $2) as seen,
+  (select count(*) from vx_status_views v where v.status_id = s.id) as view_count`;
+
+/** One update by id. An expired row reads as missing — every caller treats it as gone. */
+export async function getStatus(id: string, viewerId: string): Promise<Status | null> {
+  if (!id) return null;
+  const rows = await q<StatusRow>(
+    `select ${STATUS_COLUMNS}
+       from vx_status s
+      where s.id = $1 and s.expires_at > $3`,
+    [id, viewerId, Date.now()]
+  );
+  return rows[0] ? toStatus(rows[0]) : null;
+}
+
+/** Post an update. It is live immediately and disappears 24 hours later. */
+export async function createStatus(
+  userId: string,
+  input: {
+    kind: Status['kind'];
+    text?: string | null;
+    mediaUrl?: string | null;
+    bg?: string | null;
+  }
+): Promise<Status> {
+  const now = Date.now();
+  const status: Status = {
+    id: newId('st'),
+    userId,
+    kind: input.kind,
+    text: input.text ?? null,
+    mediaUrl: input.mediaUrl ?? null,
+    bg: input.bg ?? null,
+    createdAt: now,
+    expiresAt: now + STATUS_TTL_MS,
+    // Your own update is never "unseen" to you, and nobody has watched it yet.
+    seen: true,
+    viewCount: 0,
+  };
+  await q(
+    `insert into vx_status (id, user_id, kind, text, media_url, bg, created_at, expires_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      status.id,
+      status.userId,
+      status.kind,
+      status.text,
+      status.mediaUrl,
+      status.bg,
+      status.createdAt,
+      status.expiresAt,
+    ]
+  );
+  return status;
+}
+
+/**
+ * Ids this user already has a *direct* conversation with, derived from vx_convs.
+ *
+ * A group in common deliberately does not count: 'chats' means "people I chat with one to
+ * one", which is the smallest audience a user can reason about without a contact list.
+ */
+async function directPeerIds(userId: string): Promise<string[]> {
+  const rows = await q<{ members: string[] }>(
+    `select members from vx_convs where type = 'direct' and members @> $1::jsonb`,
+    [JSON.stringify([userId])]
+  );
+  const ids = new Set<string>();
+  for (const row of rows) {
+    for (const member of row.members ?? []) if (member !== userId) ids.add(member);
+  }
+  return Array.from(ids);
+}
+
+/** A stack counts as unseen while any single update in it is unviewed by the viewer. */
+function isUnseen(author: StatusAuthor): boolean {
+  return author.items.some((item) => !item.seen);
+}
+
+/**
+ * Everything the viewer may see, grouped by author.
+ *
+ * Visibility, in one place:
+ *  - your own group is always present, and is the only group that carries view counts;
+ *  - an author whose `privacy.statusPrivacy` is 'everyone' (the default) is visible to every
+ *    signed-in user;
+ *  - an author who chose 'chats' is visible only to people they already have a direct
+ *    conversation with — see directPeerIds, which derives that from vx_convs.
+ *
+ * Ordering: authors with something unseen first, then whoever posted most recently, with an
+ * author's own items oldest-first so the viewer plays them in the order they were posted.
+ */
+export async function listStatusFeed(viewerId: string): Promise<StatusAuthor[]> {
+  const rows = await q<StatusRow>(
+    `select ${STATUS_COLUMNS}
+       from vx_status s
+      where s.expires_at > $1
+      order by s.created_at asc`,
+    [Date.now(), viewerId]
+  );
+
+  const grouped = new Map<string, Status[]>();
+  for (const row of rows) {
+    const item = toStatus(row);
+    const list = grouped.get(row.user_id);
+    if (list) list.push(item);
+    else grouped.set(row.user_id, [item]);
+  }
+
+  const authors: StatusAuthor[] = [];
+  for (const [authorId, items] of grouped) {
+    const isSelf = authorId === viewerId;
+    const settings = await getSettings(authorId);
+    if (!isSelf && settings.privacy.statusPrivacy === 'chats') {
+      const peers = await directPeerIds(authorId);
+      if (!peers.includes(viewerId)) continue;
+    }
+    const author = await getUser(authorId);
+    if (!author) continue;
+    authors.push({
+      user: {
+        ...toPublicUser(author),
+        // The same projection presentMember applies elsewhere: a photo hidden from everyone
+        // else is hidden on the updates screen too.
+        avatar:
+          isSelf || settings.privacy.profilePhoto !== 'nobody' ? author.avatar : null,
+      },
+      // Only an author may know who watched, so everyone else's count is blanked here.
+      items: isSelf ? items : items.map((item) => ({ ...item, viewCount: 0 })),
+    });
+  }
+
+  const lastAt = (author: StatusAuthor) => author.items[author.items.length - 1]?.createdAt ?? 0;
+  authors.sort((a, b) => {
+    const unseen = Number(isUnseen(b)) - Number(isUnseen(a));
+    return unseen !== 0 ? unseen : lastAt(b) - lastAt(a);
+  });
+  return authors;
+}
+
+/**
+ * Record that a viewer opened one update.
+ *
+ * Idempotent by primary key, so re-opening an item writes nothing the second time — which is
+ * what the viewer relies on when it walks back and forth through an author's items.
+ */
+export async function markStatusSeen(statusId: string, viewerId: string): Promise<void> {
+  await q(
+    `insert into vx_status_views (status_id, viewer_id, viewed_at)
+     values ($1, $2, $3)
+     on conflict (status_id, viewer_id) do nothing`,
+    [statusId, viewerId, Date.now()]
+  );
+}
+
+/**
+ * Who watched one of your own updates, most recent first.
+ *
+ * The join to vx_status enforces ownership in the query itself rather than trusting the
+ * caller, so a non-author cannot read the list even if a route ever forgot to check.
+ */
+export async function listStatusViewers(
+  statusId: string,
+  ownerId: string
+): Promise<StatusViewer[]> {
+  const rows = await q<{ viewer_id: string; viewed_at: number }>(
+    `select v.viewer_id, v.viewed_at
+       from vx_status_views v
+       join vx_status s on s.id = v.status_id
+      where v.status_id = $1 and s.user_id = $2
+      order by v.viewed_at desc`,
+    [statusId, ownerId]
+  );
+
+  const viewers: StatusViewer[] = [];
+  for (const row of rows) {
+    if (row.viewer_id === ownerId) continue;
+    const user = await getUser(row.viewer_id);
+    if (!user) continue;
+    const settings = await getSettings(row.viewer_id);
+    viewers.push({
+      user: {
+        ...toPublicUser(user),
+        avatar: settings.privacy.profilePhoto !== 'nobody' ? user.avatar : null,
+      },
+      viewedAt: Number(row.viewed_at),
+    });
+  }
+  return viewers;
+}
+
+/** Delete one of your own updates, along with the rows recording who watched it. */
+export async function deleteStatus(statusId: string, userId: string): Promise<boolean> {
+  const rows = await q<{ id: string }>(
+    `delete from vx_status where id = $1 and user_id = $2 returning id`,
+    [statusId, userId]
+  );
+  if (!rows.length) return false;
+  await q(`delete from vx_status_views where status_id = $1`, [statusId]);
+  return true;
 }

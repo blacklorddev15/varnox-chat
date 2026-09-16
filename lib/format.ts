@@ -24,6 +24,18 @@ export function listStamp(at: number): string {
   return d.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
+/**
+ * Short "how long ago" stamp for the updates tab: an update is only interesting for the
+ * 24 hours it lives, so minutes and hours carry all the information a row needs.
+ */
+export function relativeTime(at: number): string {
+  const diff = Date.now() - at;
+  if (diff < 60_000) return 'just now';
+  if (diff < 3_600_000) return `${Math.round(diff / 60_000)} min ago`;
+  if (diff < 86_400_000) return `${Math.round(diff / 3_600_000)} h ago`;
+  return new Date(at).toLocaleDateString([], { day: 'numeric', month: 'short' });
+}
+
 export function presence(lastSeen: number): string {
   if (!lastSeen) return 'offline';
   const diff = Date.now() - lastSeen;

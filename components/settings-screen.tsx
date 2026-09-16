@@ -1,7 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import type { PrivacyWho, PublicUser, UserSettings, WallpaperId } from '@/lib/types';
+import type {
+  PrivacyWho,
+  PublicUser,
+  StatusPrivacyWho,
+  UserSettings,
+  WallpaperId,
+} from '@/lib/types';
 import { formatPhone } from '@/lib/phone';
 import { Avatar } from './avatar';
 import {
@@ -28,6 +34,12 @@ const WHO: { id: PrivacyWho; label: string }[] = [
   { id: 'everyone', label: 'Everyone' },
   { id: 'contacts', label: 'Contacts' },
   { id: 'nobody', label: 'Nobody' },
+];
+
+/** Updates have no 'nobody': the narrowest audience is the people you already chat with. */
+const STATUS_WHO: { id: StatusPrivacyWho; label: string }[] = [
+  { id: 'everyone', label: 'Everyone' },
+  { id: 'chats', label: 'My chats' },
 ];
 
 export function SettingsScreen({
@@ -283,6 +295,30 @@ export function SettingsScreen({
                   </button>
                 ))}
               </div>
+            </div>
+
+            <div className="settings-group">
+              <div className="label">Status updates</div>
+              <div className="seg-row">
+                {STATUS_WHO.map((o) => (
+                  <button
+                    key={o.id}
+                    type="button"
+                    className={`seg${settings.privacy.statusPrivacy === o.id ? ' on' : ''}`}
+                    onClick={() =>
+                      onSave({ privacy: { ...settings.privacy, statusPrivacy: o.id } }).then(() =>
+                        onToast('Privacy updated')
+                      )
+                    }
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              <p className="hint" style={{ padding: '0 22px' }}>
+                Who can see the updates you post. <b>My chats</b> limits them to the people you
+                already have a direct chat with.
+              </p>
             </div>
 
             <div className="settings-group">

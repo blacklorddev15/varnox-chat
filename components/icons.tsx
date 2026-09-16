@@ -41,6 +41,16 @@ export function IconNewChat({ size = 22, className }: P) {
   );
 }
 
+/** Updates: a dashed ring around a filled dot, the familiar "status" mark. */
+export function IconUpdates({ size = 22, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
+      <circle cx="12" cy="12" r="3.2" />
+      <circle cx="12" cy="12" r="8.6" strokeDasharray="2.6 3.3" />
+    </svg>
+  );
+}
+
 export function IconGroup({ size = 22, className }: P) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>

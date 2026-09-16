@@ -1,7 +1,13 @@
 import { requireUser } from '@/lib/auth';
 import { handle, ok, readJsonBody } from '@/lib/api';
 import { getSettings, patchSettings } from '@/lib/db';
-import type { ChatPrefs, PrivacyWho, UserSettings, WallpaperId } from '@/lib/types';
+import type {
+  ChatPrefs,
+  PrivacyWho,
+  StatusPrivacyWho,
+  UserSettings,
+  WallpaperId,
+} from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,13 +21,20 @@ export async function GET() {
 type Body = {
   wallpaper?: WallpaperId;
   notifications?: boolean;
-  privacy?: { lastSeen?: PrivacyWho; profilePhoto?: PrivacyWho; readReceipts?: boolean };
+  privacy?: {
+    lastSeen?: PrivacyWho;
+    profilePhoto?: PrivacyWho;
+    readReceipts?: boolean;
+    statusPrivacy?: StatusPrivacyWho;
+  };
   chatPrefs?: Record<string, ChatPrefs>;
   blocked?: string[];
 };
 
 const WALLS: WallpaperId[] = ['doodle', 'plain', 'dots', 'grid', 'leaf'];
 const WHO: PrivacyWho[] = ['everyone', 'contacts', 'nobody'];
+/** Updates are either open to every signed-in user or limited to people you already chat with. */
+const STATUS_WHO: StatusPrivacyWho[] = ['everyone', 'chats'];
 const PREF_KEYS: (keyof ChatPrefs)[] = ['pinned', 'muted', 'archived'];
 
 /** Keep only known flags, defensively bounded so one request cannot bloat the record. */
@@ -57,6 +70,9 @@ export async function PATCH(req: Request) {
       }
       if (typeof body.privacy.readReceipts === 'boolean') {
         privacy.readReceipts = body.privacy.readReceipts;
+      }
+      if (body.privacy.statusPrivacy && STATUS_WHO.includes(body.privacy.statusPrivacy)) {
+        privacy.statusPrivacy = body.privacy.statusPrivacy;
       }
       patch.privacy = privacy;
     }
