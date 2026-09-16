@@ -65,7 +65,19 @@ export type MemberMarker = {
   left?: boolean;
 };
 
-export type MessageType = 'text' | 'image' | 'audio' | 'file' | 'system';
+export type MessageType = 'text' | 'image' | 'audio' | 'file' | 'system' | 'location' | 'contact';
+
+/**
+ * Structured extras for the message types that carry no media: a shared location pin
+ * (lat/lng, optional label) or a shared contact card (name/phone).
+ */
+export type MessagePayload = {
+  lat?: number;
+  lng?: number;
+  label?: string;
+  name?: string;
+  phone?: string;
+};
 
 export type Message = {
   id: string;
@@ -89,6 +101,8 @@ export type Message = {
    * the media route refusing to serve the bytes without a token, not by the UI alone.
    */
   once?: boolean;
+  /** Structured data for 'location' and 'contact' messages; absent for every other type. */
+  payload?: MessagePayload;
   replyTo?: { id: string; text: string; senderName: string } | null;
 };
 

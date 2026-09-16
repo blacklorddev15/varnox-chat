@@ -281,3 +281,10 @@ create table if not exists vx_msg_views (
   viewed_at  bigint not null,
   primary key (message_id, user_id)
 );
+
+/* ── structured message payloads ──────────────────────────────────────── */
+
+-- A shared location or contact card has no media, so what it carries lives here:
+-- { lat, lng } (and an optional label) for 'location', { name, phone } for 'contact'.
+-- Every other message type leaves this null.
+alter table vx_messages add column if not exists payload jsonb;

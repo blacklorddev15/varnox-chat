@@ -10,6 +10,7 @@ import type {
   Invite,
   MemberMarker,
   Message,
+  MessagePayload,
   MsgOp,
   PublicUser,
   Reaction,
@@ -432,6 +433,7 @@ type MessageRow = {
   mime: string | null;
   forwarded: boolean;
   once: boolean;
+  payload: MessagePayload | null;
   reply_to: Message['replyTo'];
 };
 
@@ -459,6 +461,8 @@ function toMessage(r: MessageRow): Message {
   if (r.mime != null) msg.mime = r.mime;
   if (r.forwarded) msg.forwarded = true;
   if (r.once) msg.once = true;
+  // jsonb arrives already parsed, so this is passed through rather than re-parsed.
+  if (r.payload != null) msg.payload = r.payload;
   if (r.reply_to != null) msg.replyTo = r.reply_to;
   return msg;
 }
@@ -467,8 +471,8 @@ export async function saveMessage(msg: Message): Promise<void> {
   await q(
     `insert into vx_messages
        (id, conv_id, sender_id, sender_name, at, type, text, media_url, media_w, media_h,
-        audio_sec, file_name, file_size, mime, forwarded, reply_to, once)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        audio_sec, file_name, file_size, mime, forwarded, reply_to, once, payload)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
      on conflict (id) do update set
        text = excluded.text,
        media_url = excluded.media_url,
@@ -480,7 +484,8 @@ export async function saveMessage(msg: Message): Promise<void> {
        mime = excluded.mime,
        forwarded = excluded.forwarded,
        reply_to = excluded.reply_to,
-       once = excluded.once`,
+       once = excluded.once,
+       payload = excluded.payload`,
     [
       msg.id,
       msg.convId,
@@ -499,6 +504,7 @@ export async function saveMessage(msg: Message): Promise<void> {
       Boolean(msg.forwarded),
       msg.replyTo ? JSON.stringify(msg.replyTo) : null,
       Boolean(msg.once),
+      msg.payload ? JSON.stringify(msg.payload) : null,
     ]
   );
   invalidate(`m:${msg.convId}`);

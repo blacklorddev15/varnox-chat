@@ -381,6 +381,8 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
       image?: File | null;
       audio?: { blob: Blob; sec: number } | null;
       file?: File | null;
+      location?: { lat: number; lng: number };
+      contact?: { name: string; phone: string };
       once?: boolean;
     }) => {
       const chatId = selectedRef.current;
@@ -388,7 +390,22 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
       setSending(true);
       try {
         let body: Record<string, unknown> = { type: 'text', text: payload.text, replyTo: reply };
-        if (payload.image) {
+        // Location and contact carry a payload instead of a mediaUrl.
+        if (payload.location) {
+          body = {
+            type: 'location',
+            text: '',
+            payload: { lat: payload.location.lat, lng: payload.location.lng },
+            replyTo: reply,
+          };
+        } else if (payload.contact) {
+          body = {
+            type: 'contact',
+            text: '',
+            payload: { name: payload.contact.name, phone: payload.contact.phone },
+            replyTo: reply,
+          };
+        } else if (payload.image) {
           const up = await uploadMedia(payload.image, 'image', Boolean(payload.once));
           body = {
             type: 'image',
@@ -744,6 +761,7 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
         }}
         onToggleTheme={toggleTheme}
         onOpenInfo={() => setPanel('chat-info')}
+        onStartChat={startChatWith}
         onSend={send}
         onReact={react}
         onReply={setReply}

@@ -61,6 +61,10 @@ const STATEMENTS: [label: string, sql: string][] = [
     `alter table vx_messages add column if not exists once boolean not null default false`,
   ],
   [
+    'vx_messages.payload',
+    `alter table vx_messages add column if not exists payload jsonb`,
+  ],
+  [
     'vx_msg_views',
     `create table if not exists vx_msg_views (
        message_id text not null,

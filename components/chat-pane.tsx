@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ChatRow, Message, PublicUser, WallpaperId } from '@/lib/types';
+import type { ChatRow, Message, MessagePayload, PublicUser, WallpaperId } from '@/lib/types';
 import { dayLabel, presence, timeOfDay } from '@/lib/format';
-import { post } from '@/lib/client';
+import { formatPhone } from '@/lib/phone';
+import { api, post } from '@/lib/client';
 import { Avatar } from './avatar';
 import { Composer, type Outgoing } from './composer';
 import { VoiceNote } from './voice';
@@ -54,6 +55,89 @@ function bytes(n?: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** A shared location pin: an OpenStreetMap embed, which needs no API key. */
+function LocationBubble({ payload }: { payload: MessagePayload }) {
+  const lat = Number(payload.lat);
+  const lng = Number(payload.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return (
+      <div className="map-card">
+        <span className="hint">Location unavailable</span>
+      </div>
+    );
+  }
+  // A small box around the point, so the map opens already centred on it.
+  const bbox = [lng - 0.005, lat - 0.004, lng + 0.005, lat + 0.004]
+    .map((n) => encodeURIComponent(String(n)))
+    .join(',');
+  const marker = `${encodeURIComponent(String(lat))},${encodeURIComponent(String(lng))}`;
+  return (
+    <div className="map-card">
+      <iframe
+        className="map-frame"
+        title="Shared location"
+        loading="lazy"
+        src={`https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${marker}`}
+      />
+      <span className="hint">
+        {lat.toFixed(5)}, {lng.toFixed(5)}
+      </span>
+      <a
+        className="map-open"
+        href={`https://www.openstreetmap.org/?mlat=${encodeURIComponent(String(lat))}&mlon=${encodeURIComponent(String(lng))}`}
+        target="_blank"
+        rel="noreferrer"
+      >
+        Open in Maps
+      </a>
+    </div>
+  );
+}
+
+/** A shared contact card. "Message" looks the number up and starts a direct chat if it exists. */
+function ContactBubble({
+  payload,
+  onStartChat,
+}: {
+  payload: MessagePayload;
+  onStartChat: (userId: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const name = payload.name ?? '';
+  const phone = payload.phone ?? '';
+
+  async function start() {
+    if (busy || !phone) return;
+    setBusy(true);
+    setNote('');
+    try {
+      const res = await api<{ users: PublicUser[] }>(`/api/users?q=${encodeURIComponent(phone)}`);
+      const match = res.users.find((u) => u.phone === phone) ?? res.users[0] ?? null;
+      if (match) onStartChat(match.id);
+      else setNote('Not on Varnox yet');
+    } catch {
+      setNote('Could not look that number up');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="contact-card">
+      <span className="avatar">{(name.trim()[0] ?? '?').toUpperCase()}</span>
+      <span className="body">
+        <b>{name}</b>
+        <span>{formatPhone(phone) || phone}</span>
+        {note ? <span className="hint">{note}</span> : null}
+      </span>
+      <button type="button" className="btn ghost" onClick={start} disabled={busy}>
+        Message
+      </button>
+    </div>
+  );
+}
+
 function disappearLabel(sec: number): string {
   if (sec === 86_400) return '24 hours';
   if (sec === 604_800) return '7 days';
@@ -82,6 +166,7 @@ export function ChatPane({
   onBack,
   onToggleTheme,
   onOpenInfo,
+  onStartChat,
   onSend,
   onReact,
   onReply,
@@ -114,6 +199,8 @@ export function ChatPane({
   onBack: () => void;
   onToggleTheme: () => void;
   onOpenInfo: () => void;
+  /** Opens (or reuses) the direct chat with a user, the same path the new-chat panel takes. */
+  onStartChat: (userId: string) => void;
   onSend: (payload: Outgoing) => void;
   onReact: (msg: Message, emoji: string) => void;
   onReply: (draft: ReplyDraft) => void;
@@ -474,6 +561,14 @@ export function ChatPane({
                         </span>
                       </span>
                     </a>
+                  ) : null}
+
+                  {msg.type === 'location' && msg.payload ? (
+                    <LocationBubble payload={msg.payload} />
+                  ) : null}
+
+                  {msg.type === 'contact' && msg.payload ? (
+                    <ContactBubble payload={msg.payload} onStartChat={onStartChat} />
                   ) : null}
 
                   {isEditing ? (

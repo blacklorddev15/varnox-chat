@@ -116,6 +116,8 @@ function previewFor(msg: Message): string {
   if (msg.type === 'image') return 'Photo';
   if (msg.type === 'audio') return 'Voice message';
   if (msg.type === 'file') return msg.fileName || 'Document';
+  if (msg.type === 'location') return 'Location';
+  if (msg.type === 'contact') return 'Contact';
   return msg.text;
 }
 
