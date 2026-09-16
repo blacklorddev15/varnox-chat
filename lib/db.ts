@@ -1,4 +1,5 @@
 import { cached, invalidate } from './cache';
+import { normaliseEmail } from './email';
 import { rand } from './ids';
 import { q } from './pg';
 import { looksLikePhone, phoneKey } from './phone';
@@ -42,6 +43,7 @@ type UserRow = {
   id: string;
   username: string;
   phone: string | null;
+  email: string | null;
   display_name: string;
   about: string;
   avatar: string | null;
@@ -55,6 +57,7 @@ function toUser(r: UserRow): User {
     id: r.id,
     username: r.username,
     phone: r.phone ?? null,
+    email: r.email ?? null,
     displayName: r.display_name,
     about: r.about ?? '',
     avatar: r.avatar ?? null,
@@ -64,11 +67,19 @@ function toUser(r: UserRow): User {
   };
 }
 
+/**
+ * Projection for people who are *not* the account holder — search results today.
+ *
+ * The address is deliberately null: it is a login credential, not a published contact
+ * detail, so it is only ever returned to the owner themselves (see publicUser in lib/auth
+ * and presentMember with isSelf).
+ */
 function toPublicUser(u: User): PublicUser {
   return {
     id: u.id,
     username: u.username,
     phone: u.phone ?? null,
+    email: null,
     displayName: u.displayName,
     about: u.about,
     avatar: u.avatar,
@@ -87,8 +98,8 @@ export async function getUser(id: string): Promise<User | null> {
 export async function saveUser(user: User): Promise<void> {
   await q(
     `insert into vx_users
-       (id, username, phone, display_name, about, avatar, pw_hash, created_at, last_seen)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       (id, username, phone, display_name, about, avatar, pw_hash, created_at, last_seen, email)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      on conflict (id) do update set
        username = excluded.username,
        phone = excluded.phone,
@@ -96,7 +107,8 @@ export async function saveUser(user: User): Promise<void> {
        about = excluded.about,
        avatar = excluded.avatar,
        pw_hash = excluded.pw_hash,
-       last_seen = excluded.last_seen`,
+       last_seen = excluded.last_seen,
+       email = excluded.email`,
     [
       user.id,
       user.username,
@@ -107,9 +119,34 @@ export async function saveUser(user: User): Promise<void> {
       user.pwHash,
       user.createdAt,
       user.lastSeen,
+      user.email ?? null,
     ]
   );
   invalidate(`u:${user.id}`);
+}
+
+/**
+ * Look an account up by address.
+ *
+ * Matches on lower(email) so the query uses the same rule as the unique index — comparing
+ * the raw column would let "A@x.com" miss the account stored as "a@x.com" and create a
+ * duplicate that the index then rejects with a raw database error.
+ */
+export async function getUserByEmail(email: string): Promise<User | null> {
+  const normalised = normaliseEmail(email);
+  if (!normalised) return null;
+  const rows = await q<{ id: string }>(
+    'select id from vx_users where lower(email) = $1 limit 1',
+    [normalised]
+  );
+  return rows[0] ? getUser(rows[0].id) : null;
+}
+
+export async function emailTaken(email: string): Promise<boolean> {
+  const normalised = normaliseEmail(email);
+  if (!normalised) return false;
+  const rows = await q('select 1 from vx_users where lower(email) = $1 limit 1', [normalised]);
+  return rows.length > 0;
 }
 
 export async function getUserByUsername(username: string): Promise<User | null> {

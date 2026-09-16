@@ -18,6 +18,12 @@ Live: https://varnox-chat.vercel.app
   becomes an account at that moment, so there is no separate registration step and the next thing
   you see is a prompt for your name. Numbers are normalised to `+<countrycode><number>` and must be
   unique; the phone is the login ID and the way other people find you.
+- **Creating an account collects phone number, then email, then password** — one step at a time.
+  The address is stored lowercased and is unique case-insensitively (a partial unique index on
+  `lower(email)`), it signs you in alongside the number and your username, and it is the intended
+  way back into the account if the number is lost. It is **not** visible to anyone else: every
+  projection of another member returns `null` for it, and the address is unverified until an email
+  confirmation channel ships.
 - **Code sign-in is built for abuse, not just convenience** — codes are stored only as an HMAC
   (never in the clear), expire after 10 minutes, are single-use, and are thrown away after five
   wrong guesses. Sending is capped per number (3 per 15 minutes) and per IP (10 per hour) with a
@@ -25,8 +31,9 @@ Live: https://varnox-chat.vercel.app
   answers the same way whether or not the number has an account, so it cannot be used to discover
   who is registered.
 - **Password sign-in still works** — accounts created before phone login keep their password, one
-  tap away behind *Use a password instead*. Passwords are hashed with scrypt (per-user salt); the
-  session is an HMAC-signed, HttpOnly, SameSite=Lax cookie.
+  tap away behind *Use a password instead*, and the identifier field accepts the phone number, the
+  email address or the username. Passwords are hashed with scrypt (per-user salt); the session is an
+  HMAC-signed, HttpOnly, SameSite=Lax cookie.
 - **Discovery** — search by phone number (spaces, dashes and brackets are all accepted).
 - **1:1 chats** — find someone by number, start a chat, message back and forth.
 - **Groups** — create a group with **nobody else in it** if you like, then fill it later by

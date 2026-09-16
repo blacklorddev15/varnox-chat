@@ -249,3 +249,16 @@ update vx_users
    set phone = '+' || ltrim(regexp_replace(phone, '\D', '', 'g'), '0')
  where phone is not null
    and phone <> '+' || ltrim(regexp_replace(phone, '\D', '', 'g'), '0');
+
+/* ── email as an account field ────────────────────────────────────────── */
+
+-- Optional, but unique when present, and stored lowercase: people type addresses in mixed
+-- case and "A@x.com" reaches the same mailbox as "a@x.com", so treating them as two
+-- accounts would be a bug rather than a feature.
+alter table vx_users add column if not exists email text;
+
+-- Partial so it constrains only rows that have an address — accounts created before this
+-- column existed stay valid — and case-insensitive so the uniqueness matches the storage.
+create unique index if not exists vx_users_email_unique
+  on vx_users (lower(email))
+  where email is not null;

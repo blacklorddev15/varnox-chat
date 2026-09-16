@@ -79,6 +79,13 @@ export function AuthScreen({ next }: { next?: string }) {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [passwordMode, setPasswordMode] = useState<'login' | 'register'>('login');
+  /**
+   * Creating an account collects a phone number, then an email address, then a password,
+   * one step at a time. The email is the only way back into the account if the number is
+   * lost, which is why it is asked for rather than made optional.
+   */
+  const [signupStep, setSignupStep] = useState<1 | 2 | 3>(1);
+  const [email, setEmail] = useState('');
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -219,20 +226,63 @@ export function AuthScreen({ next }: { next?: string }) {
     }
   }
 
+  /**
+   * Move the signup wizard on one step, checking the current answer locally first so an
+   * obviously empty or malformed value never costs a round trip. Returns false when the
+   * step is not satisfied.
+   */
+  function advanceSignup(): boolean {
+    setError('');
+    if (signupStep === 1) {
+      if (composed().replace(/\D/g, '').length < 7) {
+        setError('Enter your number, including the country code');
+        return false;
+      }
+      setSignupStep(2);
+      return true;
+    }
+    if (signupStep === 2) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+        setError('Enter a valid email address, for example you@example.com');
+        return false;
+      }
+      setSignupStep(3);
+      return true;
+    }
+    return true;
+  }
+
   async function submitPassword(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
+    // Pressing Enter in the phone or email step should advance, not submit the whole form.
+    if (passwordMode === 'register' && signupStep < 3) {
+      advanceSignup();
+      return;
+    }
     setBusy(true);
     setError('');
     try {
       if (passwordMode === 'register') {
-        await post('/api/auth/register', { phone: identifier, displayName: name, password });
+        await post('/api/auth/register', {
+          phone: composed(),
+          email: email.trim().toLowerCase(),
+          displayName: name,
+          password,
+        });
       } else {
         await post('/api/auth/login', { identifier, password });
       }
       finish();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
+      const message = err instanceof Error ? err.message : 'Something went wrong';
+      setError(message);
+      // Send the user back to the step that owns the problem, so a rejected email does not
+      // look like a rejected password.
+      if (passwordMode === 'register') {
+        if (/email/i.test(message)) setSignupStep(2);
+        else if (/phone/i.test(message)) setSignupStep(1);
+      }
       setBusy(false);
     }
   }
@@ -402,15 +452,13 @@ export function AuthScreen({ next }: { next?: string }) {
           </>
         ) : null}
 
-        {step === 'password' ? (
+        {step === 'password' && passwordMode === 'login' ? (
           <>
-            <h1>{passwordMode === 'login' ? 'Sign in with a password' : 'Create an account'}</h1>
-            <p className="sub">
-              For accounts made before phone login. New accounts use the code instead.
-            </p>
+            <h1>Sign in with a password</h1>
+            <p className="sub">Use your phone number, email address or username.</p>
             <form onSubmit={submitPassword}>
               <div className="field-row">
-                <label htmlFor="identifier">Phone number or username</label>
+                <label htmlFor="identifier">Phone number, email or username</label>
                 <input
                   id="identifier"
                   className="input"
@@ -418,22 +466,10 @@ export function AuthScreen({ next }: { next?: string }) {
                   onChange={(e) => setIdentifier(e.target.value)}
                   placeholder="+65 9123 4567"
                   autoComplete="username"
+                  autoFocus
                   required
                 />
               </div>
-
-              {passwordMode === 'register' ? (
-                <div className="field-row">
-                  <label htmlFor="regName">Your name</label>
-                  <input
-                    id="regName"
-                    className="input"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="How your name appears in chats"
-                  />
-                </div>
-              ) : null}
 
               <div className="field-row">
                 <label htmlFor="password">Password</label>
@@ -443,8 +479,8 @@ export function AuthScreen({ next }: { next?: string }) {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder={passwordMode === 'register' ? 'At least 6 characters' : '••••••••'}
-                  autoComplete={passwordMode === 'register' ? 'new-password' : 'current-password'}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
                   required
                 />
               </div>
@@ -452,20 +488,163 @@ export function AuthScreen({ next }: { next?: string }) {
               {error ? <p className="error">{error}</p> : null}
 
               <button className="btn" type="submit" disabled={busy}>
-                {busy ? 'Please wait…' : passwordMode === 'login' ? 'Sign in' : 'Create account'}
+                {busy ? 'Please wait…' : 'Sign in'}
               </button>
             </form>
 
             <div className="switch-line">
-              {passwordMode === 'login' ? (
-                <button type="button" onClick={() => { setPasswordMode('register'); setError(''); }}>
-                  Create an account
+              <button
+                type="button"
+                onClick={() => {
+                  setPasswordMode('register');
+                  setSignupStep(1);
+                  setError('');
+                }}
+              >
+                Create an account
+              </button>
+              <button type="button" onClick={() => { setStep('phone'); setError(''); }}>
+                Use a phone code instead
+              </button>
+            </div>
+          </>
+        ) : null}
+
+        {step === 'password' && passwordMode === 'register' ? (
+          <>
+            <h1>Create an account</h1>
+            <p className="sub">
+              Step {signupStep} of 3 —{' '}
+              {signupStep === 1 ? 'your phone number' : signupStep === 2 ? 'your email address' : 'a password'}
+            </p>
+            <form onSubmit={submitPassword}>
+              {signupStep === 1 ? (
+                <>
+                  <div className="field-row">
+                    <label htmlFor="country">Country</label>
+                    <select
+                      id="country"
+                      className="input"
+                      value={country}
+                      onChange={(e) => pickCountry(e.target.value)}
+                    >
+                      <option value="">Type the number with its country code</option>
+                      {COUNTRIES.map((c) => (
+                        <option key={c.dial} value={c.dial}>
+                          {c.label} +{c.dial}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="field-row">
+                    <label htmlFor="phone">Phone number</label>
+                    <input
+                      id="phone"
+                      className="input"
+                      value={number}
+                      onChange={(e) => setNumber(e.target.value)}
+                      placeholder="+65 9123 4567"
+                      autoComplete="tel"
+                      inputMode="tel"
+                      autoFocus
+                    />
+                    <p className="hint" style={{ marginTop: 6 }}>
+                      {country
+                        ? `This will be your number: ${composed()}`
+                        : 'Include the country code, for example +65 9123 4567.'}
+                    </p>
+                  </div>
+                </>
+              ) : null}
+
+              {signupStep === 2 ? (
+                <div className="field-row">
+                  <label htmlFor="signupEmail">Email address</label>
+                  <input
+                    id="signupEmail"
+                    className="input"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    autoComplete="email"
+                    inputMode="email"
+                    autoFocus
+                  />
+                  <p className="hint" style={{ marginTop: 6 }}>
+                    Used to sign in and to recover the account.
+                  </p>
+                </div>
+              ) : null}
+
+              {signupStep === 3 ? (
+                <>
+                  <div className="field-row">
+                    <label htmlFor="regName">Your name</label>
+                    <input
+                      id="regName"
+                      className="input"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Optional — how your name appears in chats"
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="field-row">
+                    <label htmlFor="password">Password</label>
+                    <input
+                      id="password"
+                      className="input"
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="At least 6 characters"
+                      autoComplete="new-password"
+                    />
+                  </div>
+
+                  <p className="hint" style={{ marginTop: 6 }}>
+                    {composed()} · {email.trim().toLowerCase()}
+                  </p>
+                </>
+              ) : null}
+
+              {error ? <p className="error">{error}</p> : null}
+
+              {signupStep < 3 ? (
+                <button className="btn" type="button" onClick={advanceSignup}>
+                  Continue
                 </button>
               ) : (
-                <button type="button" onClick={() => { setPasswordMode('login'); setError(''); }}>
-                  Sign in
+                <button className="btn" type="submit" disabled={busy}>
+                  {busy ? 'Creating…' : 'Create account'}
                 </button>
               )}
+            </form>
+
+            <div className="switch-line">
+              {signupStep > 1 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSignupStep((s) => (s === 3 ? 2 : 1));
+                    setError('');
+                  }}
+                >
+                  Back
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  setPasswordMode('login');
+                  setError('');
+                }}
+              >
+                Sign in instead
+              </button>
               <button type="button" onClick={() => { setStep('phone'); setError(''); }}>
                 Use a phone code instead
               </button>

@@ -80,6 +80,7 @@ export function publicUser(u: User): PublicUser {
     id: u.id,
     username: u.username,
     phone: u.phone ?? null,
+    email: u.email ?? null,
     displayName: u.displayName,
     about: u.about,
     avatar: u.avatar,

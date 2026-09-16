@@ -40,6 +40,9 @@ export async function presentMember(id: string, viewerId: string): Promise<Publi
     id: user.id,
     username: user.username,
     phone: user.phone ?? null,
+    // Only ever your own address. An email is not a contact detail you publish by signing
+    // up, so other members — and search results — get null regardless of privacy settings.
+    email: isSelf ? (user.email ?? null) : null,
     displayName: user.displayName,
     about: user.about,
     avatar: showPhoto ? user.avatar : null,

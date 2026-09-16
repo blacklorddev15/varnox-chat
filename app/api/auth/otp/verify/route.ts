@@ -67,6 +67,9 @@ export async function POST(req: Request) {
           id,
           username,
           phone,
+          // No address yet: this route signs in with a code, and the profile screen is
+          // where an email gets added.
+          email: null,
           displayName,
           about: '',
           avatar: null,

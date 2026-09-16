@@ -1,6 +1,7 @@
 import { currentUser, publicUser, requireUser } from '@/lib/auth';
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
-import { getUserByPhone, releasePhone, reservePhone, saveUser } from '@/lib/db';
+import { emailTaken, getUserByPhone, releasePhone, reservePhone, saveUser } from '@/lib/db';
+import { normaliseEmail } from '@/lib/email';
 import { normalisePhone } from '@/lib/phone';
 
 export const dynamic = 'force-dynamic';
@@ -20,6 +21,7 @@ export async function PATCH(req: Request) {
       about?: string;
       avatar?: string | null;
       phone?: string;
+      email?: string | null;
     }>(req);
 
     const next = { ...me, lastSeen: Date.now() };
@@ -44,6 +46,21 @@ export async function PATCH(req: Request) {
         if (me.phone) await releasePhone(me.phone);
         await reservePhone(phone, me.id);
         next.phone = phone;
+      }
+    }
+
+    if (body.email !== undefined) {
+      const cleaned = clean(body.email, 254);
+      if (!cleaned) {
+        // An empty string clears the address, which the partial unique index allows.
+        next.email = null;
+      } else {
+        const email = normaliseEmail(cleaned);
+        if (!email) return bad('Enter a valid email address, for example you@example.com');
+        if (email !== me.email) {
+          if (await emailTaken(email)) return bad('That email is already registered', 409);
+          next.email = email;
+        }
       }
     }
 

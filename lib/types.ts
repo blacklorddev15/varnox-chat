@@ -5,6 +5,8 @@ export type User = {
   username: string;
   /** Canonical "+<digits>" login identifier. Null only for accounts made before phone login existed. */
   phone: string | null;
+  /** Lowercased address, unique when present. Not yet verified by any proof of ownership. */
+  email: string | null;
   displayName: string;
   about: string;
   avatar: string | null;
@@ -18,6 +20,8 @@ export type PublicUser = {
   id: string;
   username: string;
   phone: string | null;
+  /** Returned to the account holder for their own profile; other users never see it. */
+  email: string | null;
   displayName: string;
   about: string;
   avatar: string | null;
