@@ -80,6 +80,7 @@ export function publicUser(u: User): PublicUser {
     id: u.id,
     username: u.username,
     phone: u.phone ?? null,
+    email: u.email ?? null,
     displayName: u.displayName,
     about: u.about,
     avatar: u.avatar,
@@ -103,4 +104,14 @@ export class UnauthorizedError extends Error {
   constructor() {
     super('unauthorized');
   }
+}
+/**
+ * The hash stored for an account that signs in with a phone code and has no password.
+ *
+ * It is not a well-formed scrypt tuple, so verifyPassword() can never match it. That is
+ * the point: password login stays unavailable for the account until the user sets one,
+ * rather than being reachable with an empty or guessable password.
+ */
+export function passwordlessHash(): string {
+  return 'otp$disabled';
 }

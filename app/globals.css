@@ -1720,3 +1720,29 @@ html[data-theme='dark'] .switch-line button {
     bottom: 84px;
   }
 }
+
+/* ── phone-code sign-in ───────────────────────────────────────────────── */
+
+/* Six single-digit boxes, sized to share the row evenly and never overflow it. */
+.otp-boxes {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0 2px;
+}
+
+.otp-box {
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+  font-size: 20px;
+  padding: 12px 4px;
+}
+
+/* One row for the secondary actions (resend, change number, password fallback). */
+.switch-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  justify-content: center;
+  align-items: center;
+}

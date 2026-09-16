@@ -194,3 +194,71 @@ create table if not exists vx_media (
   size       integer not null,
   created_at bigint not null
 );
+
+/* ── phone verification (SMS one-time codes) ──────────────────────────── */
+
+-- The one code in flight for a number. A new send replaces the row rather than adding
+-- one, so there is never more than a single valid code and nothing to garbage-collect
+-- beyond the opportunistic sweep in putOtp().
+--
+-- `code_hash` is an HMAC of the code keyed by the server secret with the number mixed
+-- in, never the code itself: a database leak then yields no usable codes, and a code
+-- observed for one number cannot be replayed against another.
+create table if not exists vx_otp (
+  phone       text primary key,      -- digits only, via phoneKey()
+  code_hash   text not null,
+  sent_at     bigint not null,
+  expires_at  bigint not null,
+  attempts    integer not null default 0,
+  consumed_at bigint,
+  sent_ip     text
+);
+create index if not exists vx_otp_expires on vx_otp (expires_at);
+
+-- Fixed-window throttling buckets, so the login form cannot be turned into an SMS
+-- cannon. `bucket` is a scope string, e.g. "send:phone:6591234567", "send:ip:1.2.3.4"
+-- or "cooldown:phone:6591234567" for the resend timer.
+create table if not exists vx_otp_rate (
+  bucket        text primary key,
+  count         integer not null default 0,
+  window_start  bigint not null,
+  blocked_until bigint not null default 0
+);
+create index if not exists vx_otp_rate_window on vx_otp_rate (window_start);
+
+/* ── one-off repair: numbers stored before canonicalisation ───────────── */
+
+-- normalisePhone() now turns a "00" prefix into "+" and strips a leading zero, because an
+-- E.164 country code never starts with 0: without this, "+06591234567" and "+6591234567"
+-- were two accounts for one handset, each with its own code-sending budget. Numbers stored
+-- by the older, looser form are rewritten here so those accounts are still found by phone.
+--
+-- Safe to re-run: every statement is a no-op once the rows are canonical.
+
+-- A stale duplicate has to go first, or the update below would collide on the primary key.
+-- The canonical row wins.
+delete from vx_phones a
+ where a.phone ~ '^0'
+   and exists (select 1 from vx_phones b where b.phone = ltrim(a.phone, '0'));
+
+update vx_phones
+   set phone = ltrim(regexp_replace(phone, '\D', '', 'g'), '0')
+ where phone <> ltrim(regexp_replace(phone, '\D', '', 'g'), '0');
+
+update vx_users
+   set phone = '+' || ltrim(regexp_replace(phone, '\D', '', 'g'), '0')
+ where phone is not null
+   and phone <> '+' || ltrim(regexp_replace(phone, '\D', '', 'g'), '0');
+
+/* ── email as an account field ────────────────────────────────────────── */
+
+-- Optional, but unique when present, and stored lowercase: people type addresses in mixed
+-- case and "A@x.com" reaches the same mailbox as "a@x.com", so treating them as two
+-- accounts would be a bug rather than a feature.
+alter table vx_users add column if not exists email text;
+
+-- Partial so it constrains only rows that have an address — accounts created before this
+-- column existed stay valid — and case-insensitive so the uniqueness matches the storage.
+create unique index if not exists vx_users_email_unique
+  on vx_users (lower(email))
+  where email is not null;

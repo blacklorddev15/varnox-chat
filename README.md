@@ -13,11 +13,27 @@ Live: https://varnox-chat.vercel.app
 
 ## Features
 
-- **Accounts** — register and sign in with a **phone number** and password. Numbers are
-  normalised to `+<countrycode><number>` and must be unique; the phone is the login ID and the
-  way other people find you. Accounts created earlier with a username can still sign in with it.
-  Passwords are hashed with scrypt (per-user salt); the session is an HMAC-signed, HttpOnly,
-  SameSite=Lax cookie.
+- **Accounts** — sign in with a **phone number and a 6-digit code sent by SMS**. You enter your
+  number, Varnox texts a code, and entering it signs you in; a number nobody has used before
+  becomes an account at that moment, so there is no separate registration step and the next thing
+  you see is a prompt for your name. Numbers are normalised to `+<countrycode><number>` and must be
+  unique; the phone is the login ID and the way other people find you.
+- **Creating an account collects phone number, then email, then password** — one step at a time.
+  The address is stored lowercased and is unique case-insensitively (a partial unique index on
+  `lower(email)`), it signs you in alongside the number and your username, and it is the intended
+  way back into the account if the number is lost. It is **not** visible to anyone else: every
+  projection of another member returns `null` for it, and the address is unverified until an email
+  confirmation channel ships.
+- **Code sign-in is built for abuse, not just convenience** — codes are stored only as an HMAC
+  (never in the clear), expire after 10 minutes, are single-use, and are thrown away after five
+  wrong guesses. Sending is capped per number (3 per 15 minutes) and per IP (10 per hour) with a
+  60-second resend cooldown, because every message costs money at the provider. The start endpoint
+  answers the same way whether or not the number has an account, so it cannot be used to discover
+  who is registered.
+- **Password sign-in still works** — accounts created before phone login keep their password, one
+  tap away behind *Use a password instead*, and the identifier field accepts the phone number, the
+  email address or the username. Passwords are hashed with scrypt (per-user salt); the session is an
+  HMAC-signed, HttpOnly, SameSite=Lax cookie.
 - **Discovery** — search by phone number (spaces, dashes and brackets are all accepted).
 - **1:1 chats** — find someone by number, start a chat, message back and forth.
 - **Groups** — create a group with **nobody else in it** if you like, then fill it later by
@@ -96,8 +112,11 @@ Media (images, voice notes, files) lives in the `vx_media` table and is served b
 ```bash
 npm install
 cp .env.example .env.local   # then fill in DATABASE_URL and SESSION_SECRET
-npm run db:apply             # create the tables (safe to re-run)
+npm run db:apply             # create the tables, including the code tables (safe to re-run)
 npm run dev                  # http://localhost:3000
+
+# To sign in locally without an SMS account, put SMS_DEV_MODE=1 in .env.local:
+# the code is printed to the terminal running `npm run dev`.
 ```
 
 ## Environment variables
@@ -106,6 +125,16 @@ npm run dev                  # http://localhost:3000
 | --- | --- | --- |
 | `DATABASE_URL` | yes | Postgres connection string (Neon). Use the pooled endpoint. |
 | `SESSION_SECRET` | yes | HMAC key for session cookies. Rotating it signs everyone out. |
+| `SMS_PROVIDER` | one of these two | `twilio`, `vonage`, `messagebird`, `generic` or `console` |
+| `SMS_DEV_MODE` | one of these two | `1` prints login codes to the server log instead of sending them, for local work |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` *or* `TWILIO_MESSAGING_SERVICE_SID` | for Twilio | Credentials for the Twilio Messages API |
+| `VONAGE_API_KEY`, `VONAGE_API_SECRET`, `VONAGE_FROM` | for Vonage | Vonage SMS credentials |
+| `MESSAGEBIRD_API_KEY`, `MESSAGEBIRD_ORIGINATOR` | for MessageBird | MessageBird credentials |
+| `GENERIC_SMS_URL`, `GENERIC_SMS_TOKEN`, `GENERIC_SMS_BODY` | for generic | Any JSON SMS gateway; `{to}` and `{text}` are substituted into the body |
+| `SMS_CODE_PEPPER` | no | Extra secret for hashing codes at rest; falls back to `SESSION_SECRET` |
+
+With neither `SMS_PROVIDER` nor `SMS_DEV_MODE` set, the server says so instead of pretending a
+code was sent, so a half-configured deployment fails loudly rather than locking everyone out.
 
 `pg` does not understand Neon's `channel_binding=require` parameter, so `lib/pg.ts` strips it
 when opening the pool — you can paste Neon's string in verbatim.
@@ -117,6 +146,8 @@ when opening the pool — you can paste Neon's string in verbatim.
 | `POST` | `/api/auth/register` | Create an account |
 | `POST` | `/api/auth/login` | Sign in |
 | `POST` | `/api/auth/logout` | Sign out |
+| `POST` | `/api/auth/otp/start` | Send a login code to a phone number (throttled per number and per IP) |
+| `POST` | `/api/auth/otp/verify` | Check the code, sign in, and create the account if the number is new |
 | `GET` / `PATCH` | `/api/me` | Read or update your profile |
 | `GET` | `/api/users?q=` | Find people by username (blocked accounts are hidden) |
 | `GET` / `PATCH` | `/api/settings` | Wallpaper, notifications, privacy, chat prefs, blocked list |
@@ -140,11 +171,15 @@ when opening the pool — you can paste Neon's string in verbatim.
 
 ## Known limits
 
-- **Phone numbers are not verified.** There is no SMS step, so a number is a login ID and a
-  discovery key, not proof of ownership. Real verification needs an SMS provider (Twilio,
-  MessageBird, Vonage) connected to the project; the login flow would then add a one-time code.
-- **Nothing proves the number belongs to the person registering** — the same applies to
-  changing it in Profile. Uniqueness is enforced, ownership is not.
+- **Every code costs money.** A send is a real charge at the provider (Twilio Verify, for
+  comparison, is $0.05 per successful verification plus SMS fees as of August 2026), which is why
+  sending is capped per number and per IP. Watch for **SMS pumping**: a spike of sends to numbers
+  you never expect, or to one country you do not serve, means someone found the endpoint. Lower
+  `SEND_PER_IP` in `lib/otp.ts` and restrict the countries you send to.
+- **Changing the number in Profile does not re-verify it.** The code proves control of the number
+  used to sign in. A number added later through Profile is unique, but nothing has proven it.
+- **A verified number is not a permanent identity.** Controlling a SIM today does not stop someone
+  porting or losing it tomorrow, so add recovery codes and, if it matters, a PIN or passkey.
 - **Polling, not push.** New messages appear within about 2-4 seconds rather than instantly.
 - **No delivery guarantee for the online state.** "Delivered" is inferred from the recipient's
   last-seen time, so it can over-report if they were online without receiving the message.

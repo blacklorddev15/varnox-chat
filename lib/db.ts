@@ -1,4 +1,5 @@
 import { cached, invalidate } from './cache';
+import { normaliseEmail } from './email';
 import { rand } from './ids';
 import { q } from './pg';
 import { looksLikePhone, phoneKey } from './phone';
@@ -42,6 +43,7 @@ type UserRow = {
   id: string;
   username: string;
   phone: string | null;
+  email: string | null;
   display_name: string;
   about: string;
   avatar: string | null;
@@ -55,6 +57,7 @@ function toUser(r: UserRow): User {
     id: r.id,
     username: r.username,
     phone: r.phone ?? null,
+    email: r.email ?? null,
     displayName: r.display_name,
     about: r.about ?? '',
     avatar: r.avatar ?? null,
@@ -64,11 +67,19 @@ function toUser(r: UserRow): User {
   };
 }
 
+/**
+ * Projection for people who are *not* the account holder — search results today.
+ *
+ * The address is deliberately null: it is a login credential, not a published contact
+ * detail, so it is only ever returned to the owner themselves (see publicUser in lib/auth
+ * and presentMember with isSelf).
+ */
 function toPublicUser(u: User): PublicUser {
   return {
     id: u.id,
     username: u.username,
     phone: u.phone ?? null,
+    email: null,
     displayName: u.displayName,
     about: u.about,
     avatar: u.avatar,
@@ -87,8 +98,8 @@ export async function getUser(id: string): Promise<User | null> {
 export async function saveUser(user: User): Promise<void> {
   await q(
     `insert into vx_users
-       (id, username, phone, display_name, about, avatar, pw_hash, created_at, last_seen)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       (id, username, phone, display_name, about, avatar, pw_hash, created_at, last_seen, email)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      on conflict (id) do update set
        username = excluded.username,
        phone = excluded.phone,
@@ -96,7 +107,8 @@ export async function saveUser(user: User): Promise<void> {
        about = excluded.about,
        avatar = excluded.avatar,
        pw_hash = excluded.pw_hash,
-       last_seen = excluded.last_seen`,
+       last_seen = excluded.last_seen,
+       email = excluded.email`,
     [
       user.id,
       user.username,
@@ -107,9 +119,34 @@ export async function saveUser(user: User): Promise<void> {
       user.pwHash,
       user.createdAt,
       user.lastSeen,
+      user.email ?? null,
     ]
   );
   invalidate(`u:${user.id}`);
+}
+
+/**
+ * Look an account up by address.
+ *
+ * Matches on lower(email) so the query uses the same rule as the unique index — comparing
+ * the raw column would let "A@x.com" miss the account stored as "a@x.com" and create a
+ * duplicate that the index then rejects with a raw database error.
+ */
+export async function getUserByEmail(email: string): Promise<User | null> {
+  const normalised = normaliseEmail(email);
+  if (!normalised) return null;
+  const rows = await q<{ id: string }>(
+    'select id from vx_users where lower(email) = $1 limit 1',
+    [normalised]
+  );
+  return rows[0] ? getUser(rows[0].id) : null;
+}
+
+export async function emailTaken(email: string): Promise<boolean> {
+  const normalised = normaliseEmail(email);
+  if (!normalised) return false;
+  const rows = await q('select 1 from vx_users where lower(email) = $1 limit 1', [normalised]);
+  return rows.length > 0;
 }
 
 export async function getUserByUsername(username: string): Promise<User | null> {
@@ -137,28 +174,74 @@ export async function reserveUsername(username: string, userId: string): Promise
   );
 }
 
-/** Find people by username prefix, or by an exact phone number. */
+/**
+ * Find people to start a chat with.
+ *
+ * Three ways in, because people identify each other in three different ways: an exact
+ * phone number (with the country code, as stored), a username prefix, and — the one that
+ * matters most in practice — their display name. Accounts created from a phone number get
+ * a generated handle like "vx00000001", so a person's real name is the only thing anyone
+ * can reasonably be expected to type.
+ */
 export async function searchUsers(term: string, excludeId: string): Promise<PublicUser[]> {
   const raw = term.trim();
   if (raw.length < 1) return [];
 
-  const ids = new Set<string>();
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  const add = (id: string) => {
+    if (id === excludeId || seen.has(id)) return;
+    seen.add(id);
+    ids.push(id);
+  };
 
   // Escape LIKE wildcards so a search for "a_b" cannot match "axb".
-  const prefix = raw.toLowerCase().replace(/[\\%_]/g, (c) => '\\' + c) + '%';
-  const byName = await q<{ user_id: string }>(
+  const escape = (s: string) => s.replace(/[\\%_]/g, (c) => '\\' + c);
+  const prefix = escape(raw.toLowerCase()) + '%';
+  const contains = '%' + escape(raw.toLowerCase()) + '%';
+
+  // Handles first: typing a handle is the most precise thing a user can do, so an exact
+  // hit should not be pushed below a loose name match.
+  const byHandle = await q<{ user_id: string }>(
     'select user_id from vx_usernames where username like $1 order by username limit 12',
     [prefix]
   );
-  for (const r of byName) ids.add(r.user_id);
+  for (const r of byHandle) add(r.user_id);
+
+  // Then names, most recently active first. Capped either way: without a limit, a
+  // one-character query would walk the whole user table.
+  const byDisplayName = await q<{ id: string }>(
+    `select id from vx_users
+      where id <> $1 and display_name ilike $2
+      order by last_seen desc
+      limit 12`,
+    [excludeId, contains]
+  );
+  for (const r of byDisplayName) add(r.id);
 
   if (looksLikePhone(raw)) {
     const byPhone = await getUserByPhone(raw);
-    if (byPhone) ids.add(byPhone.id);
+    if (byPhone) add(byPhone.id);
   }
 
-  ids.delete(excludeId);
-  const users = await Promise.all([...ids].slice(0, 12).map((id) => getUser(id)));
+  const users = await Promise.all(ids.slice(0, 12).map((id) => getUser(id)));
+  return users.filter((u): u is User => Boolean(u)).map(toPublicUser);
+}
+
+/**
+ * Everyone else here, most recently active first.
+ *
+ * This is the directory shown before anything is typed. A new account has no chats, so
+ * without it the app looks empty even when other people have signed up — which is exactly
+ * the complaint that prompted it. Deliberately capped: an unbounded list would be a user
+ * dump with a search box in front of it.
+ */
+export async function listUsers(excludeId: string, limit = 50): Promise<PublicUser[]> {
+  const rows = await q<{ id: string }>(
+    'select id from vx_users where id <> $1 order by last_seen desc limit $2',
+    [excludeId, limit]
+  );
+  const users = await Promise.all(rows.map((r) => getUser(r.id)));
   return users.filter((u): u is User => Boolean(u)).map(toPublicUser);
 }
 
@@ -176,9 +259,11 @@ export async function phoneTaken(phone: string): Promise<boolean> {
 }
 
 export async function reservePhone(phone: string, userId: string): Promise<void> {
+  // do nothing, not do update: a reservation must never be silently reassigned to another
+  // account. Callers that intend to move a number release it first (see PATCH /api/me).
   await q(
     `insert into vx_phones (phone, user_id) values ($1, $2)
-     on conflict (phone) do update set user_id = excluded.user_id`,
+     on conflict (phone) do nothing`,
     [phoneKey(phone), userId]
   );
 }
@@ -955,4 +1040,199 @@ export async function searchMessages(
     })
   );
   return hits.filter((h): h is SearchHit => Boolean(h));
+}
+
+/* ── phone verification (SMS one-time codes) ───────────────────────────── */
+
+type OtpRow = {
+  phone: string;
+  code_hash: string;
+  sent_at: number;
+  expires_at: number;
+  attempts: number;
+  consumed_at: number | null;
+};
+
+export type Otp = {
+  phone: string;
+  codeHash: string;
+  sentAt: number;
+  expiresAt: number;
+  attempts: number;
+  consumedAt: number | null;
+};
+
+/**
+ * Store the code in flight for a number.
+ *
+ * One row per number: a new send replaces the previous code and resets the attempt
+ * count, so an old code can never be replayed after a resend. Rows with nothing left
+ * to prove are swept opportunistically here rather than by a scheduled job, because a
+ * Vercel deployment has nowhere to hang one.
+ */
+export async function putOtp(row: {
+  phone: string;
+  codeHash: string;
+  sentAt: number;
+  expiresAt: number;
+  ip?: string | null;
+}): Promise<void> {
+  await q('delete from vx_otp where expires_at < $1', [row.sentAt - 86_400_000]);
+  await q(
+    `insert into vx_otp (phone, code_hash, sent_at, expires_at, attempts, consumed_at, sent_ip)
+     values ($1, $2, $3, $4, 0, null, $5)
+     on conflict (phone) do update set
+       code_hash = excluded.code_hash,
+       sent_at = excluded.sent_at,
+       expires_at = excluded.expires_at,
+       attempts = 0,
+       consumed_at = null,
+       sent_ip = excluded.sent_ip`,
+    [phoneKey(row.phone), row.codeHash, row.sentAt, row.expiresAt, row.ip ?? null]
+  );
+}
+
+export async function getOtp(phone: string): Promise<Otp | null> {
+  const rows = await q<OtpRow>('select * from vx_otp where phone = $1', [phoneKey(phone)]);
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    phone: r.phone,
+    codeHash: r.code_hash,
+    sentAt: Number(r.sent_at),
+    expiresAt: Number(r.expires_at),
+    attempts: Number(r.attempts),
+    consumedAt: r.consumed_at === null ? null : Number(r.consumed_at),
+  };
+}
+
+/**
+ * Spend one guess from the code's allowance, atomically, and return the new count.
+ *
+ * Returns null when there is nothing left to guess at — the row is gone, the code is
+ * consumed or expired, or the allowance is used up. Claiming the guess *before* comparing
+ * is what stops a concurrent burst: with a read-then-write, N simultaneous attempts all
+ * observe the same count and all get hashed, so one code would absorb far more than
+ * OTP_MAX_ATTEMPTS guesses and the six-digit space stops being safe.
+ */
+export async function claimOtpAttempt(
+  phone: string,
+  now: number,
+  max: number
+): Promise<number | null> {
+  const rows = await q<{ attempts: number }>(
+    `update vx_otp set attempts = attempts + 1
+     where phone = $1 and consumed_at is null and expires_at > $2 and attempts < $3
+     returning attempts`,
+    [phoneKey(phone), now, max]
+  );
+  return rows[0] ? Number(rows[0].attempts) : null;
+}
+
+/**
+ * Claim the code. The update only matches while the row is still unconsumed, so of N
+ * concurrent verifications carrying the same correct code exactly one wins and the rest
+ * are told it was already used — a read-then-write would let every caller through and one
+ * code would mint several sessions.
+ *
+ * The row is kept for the audit trail rather than deleted.
+ */
+export async function consumeOtp(phone: string): Promise<boolean> {
+  const rows = await q(
+    'update vx_otp set consumed_at = $2 where phone = $1 and consumed_at is null returning phone',
+    [phoneKey(phone), Date.now()]
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Hand a code back when the sign-in that followed it failed, so it is not burnt for nothing.
+ *
+ * Scoped by `codeHash`, not just the number: between the consume and this call a resend
+ * could have replaced the row with a fresh code, and a phone-wide update would revive that
+ * newer code — possibly after somebody else had already signed in with it, which is exactly
+ * the one-code-one-session property the atomic consume exists to protect.
+ */
+export async function unconsumeOtp(phone: string, codeHash: string): Promise<void> {
+  await q(
+    'update vx_otp set consumed_at = null where phone = $1 and code_hash = $2 and expires_at > $3',
+    [phoneKey(phone), codeHash, Date.now()]
+  );
+}
+
+export async function clearOtp(phone: string): Promise<void> {
+  await q('delete from vx_otp where phone = $1', [phoneKey(phone)]);
+}
+
+export type RateSlot = {
+  allowed: boolean;
+  count: number;
+  /** Milliseconds until the caller may try again (0 when allowed). */
+  retryAfterMs: number;
+};
+
+/**
+ * Take one slot from a fixed-window bucket, atomically.
+ *
+ * This is what stops someone turning the login form into an SMS cannon, where every
+ * request costs real money at the provider. Window and limit are per caller — per
+ * number, per IP — and a bucket that runs out stays blocked until its window ends.
+ *
+ * It is a single statement with `on conflict ... returning`, so two concurrent requests
+ * cannot both read the same stale count and each conclude they are within the limit.
+ * While a bucket is already blocked its counter is left alone and the original
+ * `blocked_until` is preserved, so hammering it cannot extend its own lockout.
+ */
+export async function takeRateSlot(
+  bucket: string,
+  windowMs: number,
+  limit: number,
+  now = Date.now()
+): Promise<RateSlot> {
+  const rows = await q<{ count: number; blocked_until: number }>(
+    `insert into vx_otp_rate (bucket, count, window_start, blocked_until)
+     values ($1, 1, $2, 0)
+     on conflict (bucket) do update set
+       count = case
+         when vx_otp_rate.blocked_until > $2 then vx_otp_rate.count
+         when vx_otp_rate.window_start + $3 <= $2 then 1
+         else vx_otp_rate.count + 1 end,
+       window_start = case
+         when vx_otp_rate.blocked_until > $2 then vx_otp_rate.window_start
+         when vx_otp_rate.window_start + $3 <= $2 then $2
+         else vx_otp_rate.window_start end,
+       blocked_until = case
+         when vx_otp_rate.blocked_until > $2 then vx_otp_rate.blocked_until
+         when (case
+                 when vx_otp_rate.window_start + $3 <= $2 then 1
+                 else vx_otp_rate.count + 1 end) > $4
+           then (case
+                   when vx_otp_rate.window_start + $3 <= $2 then $2
+                   else vx_otp_rate.window_start end) + $3
+         else 0 end
+     returning count, blocked_until`,
+    [bucket, now, windowMs, limit]
+  );
+
+  const row = rows[0];
+  if (!row) return { allowed: true, count: 0, retryAfterMs: 0 };
+  const blockedUntil = Number(row.blocked_until);
+  if (blockedUntil > now) {
+    return { allowed: false, count: Number(row.count), retryAfterMs: blockedUntil - now };
+  }
+  return { allowed: true, count: Number(row.count), retryAfterMs: 0 };
+}
+/**
+ * Resolve an account by number, falling back to the column on vx_users.
+ *
+ * vx_phones is the authority on "taken", and login goes through that index — but an
+ * account whose reservation is missing (written before phone login existed, or by a
+ * direct edit) still has to be found. Without this fallback a code login would create a
+ * second account for a number that already has one, and both would be able to sign in.
+ */
+export async function findUserByPhone(phone: string): Promise<User | null> {
+  const viaIndex = await getUserByPhone(phone);
+  if (viaIndex) return viaIndex;
+  const rows = await q<{ id: string }>('select id from vx_users where phone = $1 limit 1', [phone]);
+  return rows[0] ? getUser(rows[0].id) : null;
 }

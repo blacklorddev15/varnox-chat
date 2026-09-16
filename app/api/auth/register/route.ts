@@ -6,7 +6,16 @@ import {
   setSessionCookie,
 } from '@/lib/auth';
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
-import { getUserByUsername, phoneTaken, reservePhone, reserveUsername, saveUser, usernameTaken } from '@/lib/db';
+import {
+  emailTaken,
+  getUserByUsername,
+  phoneTaken,
+  reservePhone,
+  reserveUsername,
+  saveUser,
+  usernameTaken,
+} from '@/lib/db';
+import { normaliseEmail } from '@/lib/email';
 import { rand, newId } from '@/lib/ids';
 import { formatPhone, normalisePhone } from '@/lib/phone';
 import type { User } from '@/lib/types';
@@ -15,6 +24,7 @@ export const dynamic = 'force-dynamic';
 
 type Body = {
   phone?: string;
+  email?: string;
   username?: string;
   displayName?: string;
   password?: string;
@@ -34,6 +44,15 @@ export async function POST(req: Request) {
     if (phone && (await phoneTaken(phone))) {
       return bad('That phone number is already registered', 409);
     }
+
+    // The address is part of the account now: it is the only way back in if the number is
+    // lost, so it is required rather than optional. It is stored lowercased and checked
+    // case-insensitively, the same rule the unique index enforces.
+    const rawEmail = clean(body.email, 254);
+    if (!rawEmail) return bad('Enter your email address');
+    const email = normaliseEmail(rawEmail);
+    if (!email) return bad('Enter a valid email address, for example you@example.com');
+    if (await emailTaken(email)) return bad('That email is already registered', 409);
 
     const requested = clean(body.username, 24).toLowerCase().replace(/\s+/g, '');
     let wanted = requested || (phone ? handleFromPhone(phone) : '');
@@ -61,6 +80,7 @@ export async function POST(req: Request) {
       id: newId('u'),
       username: wanted,
       phone,
+      email,
       displayName: clean(body.displayName, 40) || (phone ? formatPhone(phone) : wanted),
       about: 'Hey there! I am using Varnox.',
       avatar: null,
