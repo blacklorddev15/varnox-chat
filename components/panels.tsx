@@ -46,22 +46,24 @@ function useUserSearch(query: string) {
   const [searching, setSearching] = useState(false);
   useEffect(() => {
     const q = query.trim();
-    if (q.length < 1) {
-      setResults([]);
-      return;
-    }
     let alive = true;
     setSearching(true);
-    const timer = window.setTimeout(async () => {
-      try {
-        const res = await api<{ users: PublicUser[] }>(`/api/users?q=${encodeURIComponent(q)}`);
-        if (alive) setResults(res.users);
-      } catch {
-        if (alive) setResults([]);
-      } finally {
-        if (alive) setSearching(false);
-      }
-    }, 220);
+    // An empty query fetches the directory rather than clearing the list: a new account has
+    // no chats, so the panel would otherwise open empty and look broken.
+    const timer = window.setTimeout(
+      async () => {
+        try {
+          const path = q.length < 1 ? '/api/users' : `/api/users?q=${encodeURIComponent(q)}`;
+          const res = await api<{ users: PublicUser[] }>(path);
+          if (alive) setResults(res.users);
+        } catch {
+          if (alive) setResults([]);
+        } finally {
+          if (alive) setSearching(false);
+        }
+      },
+      q.length < 1 ? 0 : 220
+    );
     return () => {
       alive = false;
       window.clearTimeout(timer);
@@ -90,18 +92,28 @@ export function NewChatPanel({
           autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by phone number"
-          inputMode="tel"
+          placeholder="Search by name, phone or username"
         />
       </div>
 
-      {!query.trim() ? (
-        <p className="hint">
-          You are signed in as <b>{label(me)}</b>. Type someone else&apos;s phone number to find
-          them — both sides need an account here first.
+      {!query.trim() && results.length > 0 ? (
+        <p className="hint" style={{ marginBottom: 8 }}>
+          People on Varnox
         </p>
-      ) : results.length === 0 ? (
-        <p className="hint">{searching ? 'Searching…' : `No one found for “${query.trim()}”.`}</p>
+      ) : null}
+
+      {results.length === 0 ? (
+        <p className="hint">
+          {query.trim() ? (
+            searching ? 'Searching…' : `No one found for “${query.trim()}”.`
+          ) : searching ? (
+            'Loading…'
+          ) : (
+            <>
+              Nobody else has signed up yet. You are signed in as <b>{label(me)}</b>.
+            </>
+          )}
+        </p>
       ) : (
         results.map((user) => (
           <button key={user.id} type="button" className="pick-row" onClick={() => onPick(user.id)}>

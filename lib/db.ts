@@ -174,28 +174,74 @@ export async function reserveUsername(username: string, userId: string): Promise
   );
 }
 
-/** Find people by username prefix, or by an exact phone number. */
+/**
+ * Find people to start a chat with.
+ *
+ * Three ways in, because people identify each other in three different ways: an exact
+ * phone number (with the country code, as stored), a username prefix, and — the one that
+ * matters most in practice — their display name. Accounts created from a phone number get
+ * a generated handle like "vx00000001", so a person's real name is the only thing anyone
+ * can reasonably be expected to type.
+ */
 export async function searchUsers(term: string, excludeId: string): Promise<PublicUser[]> {
   const raw = term.trim();
   if (raw.length < 1) return [];
 
-  const ids = new Set<string>();
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  const add = (id: string) => {
+    if (id === excludeId || seen.has(id)) return;
+    seen.add(id);
+    ids.push(id);
+  };
 
   // Escape LIKE wildcards so a search for "a_b" cannot match "axb".
-  const prefix = raw.toLowerCase().replace(/[\\%_]/g, (c) => '\\' + c) + '%';
-  const byName = await q<{ user_id: string }>(
+  const escape = (s: string) => s.replace(/[\\%_]/g, (c) => '\\' + c);
+  const prefix = escape(raw.toLowerCase()) + '%';
+  const contains = '%' + escape(raw.toLowerCase()) + '%';
+
+  // Handles first: typing a handle is the most precise thing a user can do, so an exact
+  // hit should not be pushed below a loose name match.
+  const byHandle = await q<{ user_id: string }>(
     'select user_id from vx_usernames where username like $1 order by username limit 12',
     [prefix]
   );
-  for (const r of byName) ids.add(r.user_id);
+  for (const r of byHandle) add(r.user_id);
+
+  // Then names, most recently active first. Capped either way: without a limit, a
+  // one-character query would walk the whole user table.
+  const byDisplayName = await q<{ id: string }>(
+    `select id from vx_users
+      where id <> $1 and display_name ilike $2
+      order by last_seen desc
+      limit 12`,
+    [excludeId, contains]
+  );
+  for (const r of byDisplayName) add(r.id);
 
   if (looksLikePhone(raw)) {
     const byPhone = await getUserByPhone(raw);
-    if (byPhone) ids.add(byPhone.id);
+    if (byPhone) add(byPhone.id);
   }
 
-  ids.delete(excludeId);
-  const users = await Promise.all([...ids].slice(0, 12).map((id) => getUser(id)));
+  const users = await Promise.all(ids.slice(0, 12).map((id) => getUser(id)));
+  return users.filter((u): u is User => Boolean(u)).map(toPublicUser);
+}
+
+/**
+ * Everyone else here, most recently active first.
+ *
+ * This is the directory shown before anything is typed. A new account has no chats, so
+ * without it the app looks empty even when other people have signed up — which is exactly
+ * the complaint that prompted it. Deliberately capped: an unbounded list would be a user
+ * dump with a search box in front of it.
+ */
+export async function listUsers(excludeId: string, limit = 50): Promise<PublicUser[]> {
+  const rows = await q<{ id: string }>(
+    'select id from vx_users where id <> $1 order by last_seen desc limit $2',
+    [excludeId, limit]
+  );
+  const users = await Promise.all(rows.map((r) => getUser(r.id)));
   return users.filter((u): u is User => Boolean(u)).map(toPublicUser);
 }
 
