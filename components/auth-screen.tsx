@@ -326,7 +326,16 @@ export function AuthScreen({ next }: { next?: string }) {
     try {
       const trimmed = name.trim();
       if (trimmed) await patch('/api/me', { displayName: trimmed });
-      finish();
+      /* This used to be finish(), which is why joining by phone skipped the whole back half of
+         the wizard: no picture, no terms, no notifications — three things the password route
+         asks everybody.
+         The account already exists by now, because the code step created it, so there is no
+         password to set. The wizard simply resumes at the picture and runs the remaining steps,
+         which submit through the same form and advance the same way. */
+      setPasswordMode('register');
+      setSignupStep(4);
+      setStep('password');
+      setBusy(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
       setBusy(false);
