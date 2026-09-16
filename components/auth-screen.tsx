@@ -65,6 +65,27 @@ const COUNTRIES: Country[] = [
 
 const CODE_LENGTH = 6;
 
+/**
+ * PLAIN-LANGUAGE PLACEHOLDER, NOT LEGAL ADVICE.
+ *
+ * This is a short, readable summary of what the service is and what it expects of the
+ * person using it, written in the voice of the rest of the app. It is a placeholder: the
+ * owner of this Varnox deployment should replace it with their own terms and have them
+ * checked by someone qualified before relying on them. Until then it is a fair description
+ * of how the app behaves, not a contract.
+ */
+const TERMS_SUMMARY: string[] = [
+  'Varnox is a small messaging service you run or join through your own server. It is provided as it is, with no promise that it will always be available, fast, or free of faults.',
+  'You must be old enough to use it: at least 13, or the age of digital consent where you live if that is higher.',
+  'Be decent to other people. Do not use Varnox to harass, threaten, bully or spam anyone, and do not use it for anything illegal.',
+  'The messages, photos and voice notes you send are stored on this Varnox server so they can be delivered and read back. They are not shared with any other messenger, and they are not end-to-end encrypted.',
+  'You can delete your account at any time, and you can ask for a copy of the information held about you.',
+  'Accounts that abuse the service — spamming, harassment or anything illegal — may be suspended or removed.',
+];
+
+/** What the notifications step can end up saying. */
+type NotifyOutcome = 'granted' | 'denied' | 'dismissed' | 'unavailable' | 'skipped';
+
 export function AuthScreen({ next }: { next?: string }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>('phone');
@@ -84,11 +105,17 @@ export function AuthScreen({ next }: { next?: string }) {
   const [passwordMode, setPasswordMode] = useState<'login' | 'register'>('login');
   /**
    * Creating an account collects a phone number, then a username, then a password, then an
-   * optional profile picture, one step at a time. The username is the handle people search
-   * for, which is why it is asked for rather than generated silently.
+   * optional profile picture, then the terms, then a decision about notifications, one step
+   * at a time. The username is the handle people search for, which is why it is asked for
+   * rather than generated silently.
    */
-  const [signupStep, setSignupStep] = useState<1 | 2 | 3 | 4>(1);
+  const [signupStep, setSignupStep] = useState<1 | 2 | 3 | 4 | 5 | 6>(1);
   const [username, setUsername] = useState('');
+  /** Step 5: the wizard only moves on with the box ticked. */
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  /** Step 6: null until the permission question has been answered or skipped. */
+  const [notifyOutcome, setNotifyOutcome] = useState<NotifyOutcome | null>(null);
+  const [notifyBusy, setNotifyBusy] = useState(false);
   /** The uploaded address, once the picture has made it to the server. */
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   /** The picture as chosen, shown before (and even without) a successful upload. */
@@ -286,6 +313,19 @@ export function AuthScreen({ next }: { next?: string }) {
       setSignupStep(3);
       return true;
     }
+    if (signupStep === 4) {
+      // The picture is optional and already uploaded on its own, so there is nothing to check.
+      setSignupStep(5);
+      return true;
+    }
+    if (signupStep === 5) {
+      if (!termsAccepted) {
+        setError('Please agree to the terms before continuing');
+        return false;
+      }
+      setSignupStep(6);
+      return true;
+    }
     return true;
   }
 
@@ -313,6 +353,31 @@ export function AuthScreen({ next }: { next?: string }) {
     }
   }
 
+  /**
+   * Ask the browser whether it will show notifications. Nothing is subscribed here and no
+   * service worker is involved: the answer is reported and that is all. The API is missing
+   * in some browsers and in anything not served over https, so it is checked before it is
+   * called rather than being allowed to throw.
+   */
+  async function requestNotifications() {
+    if (notifyBusy) return;
+    setError('');
+    if (typeof window === 'undefined' || !('Notification' in window) || !window.Notification) {
+      setNotifyOutcome('unavailable');
+      return;
+    }
+    setNotifyBusy(true);
+    try {
+      const answer = await window.Notification.requestPermission();
+      // 'default' is what comes back when the prompt was dismissed without a choice.
+      setNotifyOutcome(answer === 'granted' ? 'granted' : answer === 'denied' ? 'denied' : 'dismissed');
+    } catch {
+      setNotifyOutcome('unavailable');
+    } finally {
+      setNotifyBusy(false);
+    }
+  }
+
   async function submitPassword(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
@@ -321,9 +386,10 @@ export function AuthScreen({ next }: { next?: string }) {
       advanceSignup();
       return;
     }
-    // The picture step has nothing left to send, so Enter finishes like the buttons do.
-    if (passwordMode === 'register' && signupStep === 4) {
-      finish();
+    // The picture, terms and notifications steps have nothing left to send, so Enter moves
+    // along the same path the buttons do. Entering the app only happens from step 6.
+    if (passwordMode === 'register' && signupStep > 3) {
+      advanceSignup();
       return;
     }
     setBusy(true);
@@ -633,14 +699,18 @@ export function AuthScreen({ next }: { next?: string }) {
           <>
             <h1>Create an account</h1>
             <p className="sub">
-              Step {signupStep} of 4 —{' '}
+              Step {signupStep} of 6 —{' '}
               {signupStep === 1
                 ? 'your phone number'
                 : signupStep === 2
                   ? 'a username'
                   : signupStep === 3
                     ? 'a password'
-                    : 'a profile picture'}
+                    : signupStep === 4
+                      ? 'a profile picture'
+                      : signupStep === 5
+                        ? 'the terms'
+                        : 'notifications'}
             </p>
             <form onSubmit={submitPassword}>
               {signupStep === 1 ? (
@@ -769,9 +839,66 @@ export function AuthScreen({ next }: { next?: string }) {
                 </>
               ) : null}
 
+              {signupStep === 5 ? (
+                <>
+                  <div className="terms-box">
+                    {TERMS_SUMMARY.map((line) => (
+                      <p key={line}>{line}</p>
+                    ))}
+                  </div>
+
+                  <label className="terms-agree">
+                    <input
+                      type="checkbox"
+                      checked={termsAccepted}
+                      onChange={(e) => {
+                        setTermsAccepted(e.target.checked);
+                        if (e.target.checked) setError('');
+                      }}
+                    />
+                    <span>I have read and agree to these terms</span>
+                  </label>
+                </>
+              ) : null}
+
+              {signupStep === 6 ? (
+                <>
+                  <p className="hint" style={{ marginTop: 6 }}>
+                    Varnox can tell you when a new message arrives, so you do not have to keep
+                    the app open to notice one. Your browser will ask you to confirm; you can
+                    change your answer later in its settings.
+                  </p>
+
+                  {notifyOutcome === 'granted' || notifyOutcome === 'unavailable' ? null : (
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() => void requestNotifications()}
+                      disabled={notifyBusy}
+                    >
+                      {notifyBusy ? 'Asking…' : 'Turn on notifications'}
+                    </button>
+                  )}
+
+                  {notifyOutcome ? (
+                    <p className="hint" style={{ marginTop: 6 }}>
+                      {notifyOutcome === 'granted'
+                        ? 'Notifications are on. You will be told when a message arrives.'
+                        : notifyOutcome === 'denied'
+                          ? 'Notifications are blocked for this site. You can allow them again in your browser settings.'
+                          : notifyOutcome === 'dismissed'
+                            ? 'The question was dismissed, so notifications stay off for now.'
+                            : notifyOutcome === 'unavailable'
+                              ? 'This browser does not offer notifications, so there is nothing to turn on.'
+                              : 'Notifications stay off for now. You can turn them on later in Settings.'}
+                    </p>
+                  ) : null}
+                </>
+              ) : null}
+
               {error ? <p className="error">{error}</p> : null}
 
-              {signupStep < 3 ? (
+              {signupStep < 3 || signupStep === 4 ? (
                 <button className="btn" type="button" onClick={advanceSignup}>
                   Continue
                 </button>
@@ -779,26 +906,35 @@ export function AuthScreen({ next }: { next?: string }) {
                 <button className="btn" type="submit" disabled={busy}>
                   {busy ? 'Creating…' : 'Create account'}
                 </button>
-              ) : (
+              ) : signupStep === 5 ? (
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={advanceSignup}
+                  disabled={!termsAccepted}
+                >
+                  Continue
+                </button>
+              ) : notifyOutcome ? (
                 // Nothing is awaited on the way in: the picture uploads on its own, and
                 // finishing is immediate whether or not it has landed.
                 <button className="btn" type="button" onClick={finish}>
                   Get started
                 </button>
-              )}
+              ) : null}
             </form>
 
             <div className="switch-line">
-              {signupStep === 4 ? (
-                <button type="button" onClick={finish}>
-                  Skip for now
+              {signupStep === 6 && !notifyOutcome ? (
+                <button type="button" onClick={() => setNotifyOutcome('skipped')} disabled={notifyBusy}>
+                  Not now
                 </button>
               ) : null}
               {signupStep > 1 ? (
                 <button
                   type="button"
                   onClick={() => {
-                    setSignupStep((s) => (s === 4 ? 3 : s === 3 ? 2 : 1));
+                    setSignupStep((s) => (s === 6 ? 5 : s === 5 ? 4 : s === 4 ? 3 : s === 3 ? 2 : 1));
                     setError('');
                   }}
                 >

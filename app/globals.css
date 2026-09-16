@@ -703,6 +703,11 @@ html[data-theme='dark'] .bubble .reply b {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A link inside the quote keeps the quote's quiet colour, underlined like every other link. */
+.bubble .reply span a {
+  color: inherit;
+  text-decoration: underline;
+}
 
 .tick {
   display: inline-flex;
@@ -1764,6 +1769,42 @@ html[data-theme='dark'] .search-hit b {
   width: 100%;
   padding: 12px;
   margin-top: 6px;
+}
+/* The terms summary: short enough to read, tall enough that it has to be scrolled. */
+.terms-box {
+  max-height: 220px;
+  overflow-y: auto;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13.4px;
+  line-height: 1.6;
+}
+.terms-box p {
+  margin: 0 0 10px;
+}
+.terms-box p:last-child {
+  margin-bottom: 0;
+}
+.terms-agree {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 13px;
+  font-size: 13.6px;
+  line-height: 1.5;
+  color: var(--text);
+  cursor: pointer;
+}
+.terms-agree input {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--brand);
 }
 .switch-line {
   margin-top: 18px;
