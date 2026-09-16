@@ -27,6 +27,8 @@ import type {
   StatusViewer,
   User,
   UserSettings,
+  WhatsAppPairing,
+  WhatsAppSession,
 } from './types';
 
 /**
@@ -2512,4 +2514,202 @@ export async function listCallSignals(
     fromId: row.from_id,
     payload: row.payload,
   }));
+}
+
+/* ── whatsapp pairing (an external bot links the number) ───────────────── */
+
+/**
+ * How long a pairing request stays claimable.
+ *
+ * Five minutes, and no longer: the bot's own watchdog fails a request that has not produced a
+ * code within ninety seconds, so a longer window here would leave the screen waiting on an
+ * answer that can no longer arrive.
+ */
+export const WHATSAPP_PAIRING_TTL_MS = 5 * 60_000;
+
+/**
+ * Returned when one account already has a request the bot has not finished with.
+ *
+ * Exported so the route can tell this refusal — which is the caller's fault — from a database
+ * error, and answer it with a conflict rather than the 500 a bare throw would become.
+ */
+export const PAIRING_BUSY = 'You already have a WhatsApp pairing request in progress';
+
+/**
+ * Canonicalise a number for the pairing bot: a leading "+", then 8 to 15 digits.
+ *
+ * Deliberately not normalisePhone(): that one accepts seven digits and rewrites a leading
+ * zero, which is right for a Varnox login identifier but wrong here, because the string is
+ * handed to WhatsApp and must be the international form as the user wrote it. Spaces, dashes
+ * and brackets are the only things dropped.
+ */
+export function pairingPhone(input: unknown): string | null {
+  const raw = String(input ?? '').trim();
+  const compact = raw.replace(/[\s()\[\].-]/g, '');
+  const digits = compact.startsWith('+') ? compact.slice(1) : compact;
+  if (!/^\d+$/.test(digits)) return null;
+  if (digits.length < 8 || digits.length > 15) return null;
+  return `+${digits}`;
+}
+
+/**
+ * A timestamptz column as epoch milliseconds.
+ *
+ * node-postgres hands a timestamptz back as a Date, but a driver change or a hand-written
+ * string would hand back something else, and a screen showing "Invalid Date" is worse than
+ * one showing nothing. Anything unreadable reads as 0.
+ */
+function toEpochMs(value: unknown): number {
+  if (value instanceof Date) return value.getTime();
+  if (value == null) return 0;
+  const at = new Date(String(value)).getTime();
+  return Number.isFinite(at) ? at : 0;
+}
+
+type PairingRow = {
+  id: number;
+  user_id: string;
+  phone: string;
+  status: string;
+  pairing_code: string | null;
+  error: string | null;
+  expires_at: Date | string;
+  created_at: Date | string;
+  updated_at: Date | string;
+};
+
+function toPairing(r: PairingRow): WhatsAppPairing {
+  return {
+    id: Number(r.id),
+    phone: r.phone,
+    status: r.status,
+    code: r.pairing_code ?? null,
+    error: r.error ?? null,
+    expiresAt: toEpochMs(r.expires_at),
+    createdAt: toEpochMs(r.created_at),
+  };
+}
+
+/**
+ * Queue a pairing request for the external bot to pick up.
+ *
+ * One request per account at a time: while a pending or processing row still has time on it,
+ * a second request is refused, so a double tap cannot queue two and the screen only ever has
+ * one thing to watch. The expired-but-unswept case is excluded on purpose — the bot's own
+ * claim ignores an expired row, so refusing here would otherwise lock the account out until
+ * its watchdog ran.
+ */
+export async function startWhatsAppPairing(
+  userId: string,
+  phone: string
+): Promise<WhatsAppPairing> {
+  const normalised = pairingPhone(phone);
+  if (!normalised) {
+    throw new Error('That does not look like an international phone number');
+  }
+
+  const existing = await q<{ id: number }>(
+    `select id from varnox_pairing_requests
+      where user_id = $1 and status in ('pending', 'processing') and expires_at > now()
+      limit 1`,
+    [userId]
+  );
+  if (existing.length) throw new Error(PAIRING_BUSY);
+
+  const now = Date.now();
+  const rows = await q<PairingRow>(
+    `insert into varnox_pairing_requests
+       (user_id, phone, status, expires_at, created_at, updated_at)
+     values ($1, $2, 'pending', $3, $4, $4)
+     returning *`,
+    [userId, normalised, new Date(now + WHATSAPP_PAIRING_TTL_MS), new Date(now)]
+  );
+  const row = rows[0];
+  if (!row) throw new Error('Could not start the pairing request');
+  return toPairing(row);
+}
+
+/**
+ * One request, and only for the user who made it.
+ *
+ * Scoped by user_id in the query itself rather than checked afterwards, so a stranger asking
+ * for an id they guessed reads nothing — and never somebody else's pairing code. Null covers
+ * both "no such request" and "not yours", so the two are indistinguishable to the caller.
+ */
+export async function getWhatsAppPairing(
+  id: number,
+  userId: string
+): Promise<WhatsAppPairing | null> {
+  if (!Number.isFinite(id)) return null;
+  const rows = await q<PairingRow>(
+    'select * from varnox_pairing_requests where id = $1 and user_id = $2',
+    [id, userId]
+  );
+  return rows[0] ? toPairing(rows[0]) : null;
+}
+
+type WhatsAppSessionRow = {
+  id: string;
+  phone: string | null;
+  status: string | null;
+  updated_at: Date | string;
+};
+
+/**
+ * The WhatsApp numbers this account has linked, newest first.
+ *
+ * A session is attributed to a user through the pairing request that created it: the bot's
+ * session id is 'web_' followed by the phone number, and the same phone appears in
+ * varnox_pairing_requests with the user_id that asked for it. A phone only counts once a
+ * pairing for it has actually reached 'connected', so a session row the bot wrote for a
+ * failed attempt never appears. A session the bot has marked 'disconnected' is filtered out
+ * of the list rather than deleted — the row stays as history.
+ */
+export async function listWhatsAppSessions(userId: string): Promise<WhatsAppSession[]> {
+  const rows = await q<WhatsAppSessionRow>(
+    `select s.id, s.phone, s.status, s.updated_at
+       from varnox_sessions s
+      where s.status is distinct from 'disconnected'
+        and exists (
+          select 1 from varnox_pairing_requests p
+           where p.user_id = $1
+             and 'web_' || p.phone = s.id
+             and p.status = 'connected'
+        )
+      order by s.updated_at desc`,
+    [userId]
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    phone: r.phone ?? '',
+    status: r.status ?? '',
+    updatedAt: toEpochMs(r.updated_at),
+  }));
+}
+
+/**
+ * Drop a linked number from this account's list.
+ *
+ * The delete is scoped to a session whose phone this user actually paired, so an id belonging
+ * to somebody else deletes nothing. Nothing is revoked at WhatsApp: this removes the app's
+ * list entry, and the phone is not handed back to the bot — it stays linked on that side.
+ */
+export async function forgetWhatsAppSession(
+  userId: string,
+  sessionId: string
+): Promise<boolean> {
+  if (!sessionId) return false;
+  const rows = await q<{ id: string }>(
+    `delete from varnox_sessions s
+      where s.id = $1
+        and exists (
+          select 1 from varnox_pairing_requests p
+           where p.user_id = $2
+             and 'web_' || p.phone = s.id
+             and p.status = 'connected'
+        )
+      returning s.id`,
+    [sessionId, userId]
+  );
+  return rows.length > 0;
 }

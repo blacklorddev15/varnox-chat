@@ -259,6 +259,43 @@ const STEPS: Step[] = [
     label: 'vx_call_signals_call',
     sql: `create index if not exists vx_call_signals_call on vx_call_signals (call_id, seq)`,
   },
+  {
+    kind: 'table',
+    label: 'varnox_pairing_requests',
+    sql: `create table if not exists varnox_pairing_requests (
+            id           serial primary key,
+            user_id      text not null,
+            phone        text not null,
+            status       text not null default 'pending',
+            pairing_code text,
+            error        text,
+            expires_at   timestamptz not null,
+            created_at   timestamptz not null default now(),
+            updated_at   timestamptz not null default now()
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'varnox_pairing_requests_status',
+    sql: `create index if not exists varnox_pairing_requests_status
+            on varnox_pairing_requests (status, expires_at)`,
+  },
+  {
+    kind: 'index',
+    label: 'varnox_pairing_requests_user',
+    sql: `create index if not exists varnox_pairing_requests_user
+            on varnox_pairing_requests (user_id, updated_at desc)`,
+  },
+  {
+    kind: 'table',
+    label: 'varnox_sessions',
+    sql: `create table if not exists varnox_sessions (
+            id         text primary key,
+            phone      text,
+            status     text,
+            updated_at timestamptz not null default now()
+          )`,
+  },
 ];
 
 /** A request waits this long for reconciliation, then carries on without it. */

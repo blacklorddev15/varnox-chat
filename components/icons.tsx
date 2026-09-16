@@ -550,3 +550,19 @@ export function IconSpeakerOff({ size = 22, className }: P) {
     </svg>
   );
 }
+
+/**
+ * A speech balloon carrying a handset: the mark for "link a WhatsApp number". Drawn from the
+ * same speech shape as IconChat, with the handset from IconPhone scaled inside it, so it reads
+ * as a chat app placing a call rather than a second, unrelated logo.
+ */
+export function IconWhatsApp({ size = 20, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
+      <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.6 9.6 0 0 1-2.9-.4L4 21l1.4-4.2A8.3 8.3 0 0 1 3 11.5 8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5Z" />
+      <g transform="translate(6.2 6.4) scale(0.5)">
+        <path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.24 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.4 11.4 0 0 0 .57 3.6 1 1 0 0 1-.25 1z" />
+      </g>
+    </svg>
+  );
+}

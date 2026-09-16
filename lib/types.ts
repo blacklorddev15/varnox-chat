@@ -380,3 +380,39 @@ export type CallSignal = {
   fromId: string;
   payload: string;
 };
+
+/**
+ * One "Link WhatsApp" request, as the pairing screen sees it.
+ *
+ * `status` is whatever the external bot has written — 'pending', 'processing',
+ * 'code_generated', 'connected', 'failed' or 'expired'. Any other value is passed through
+ * untouched rather than mapped, so a bot that grows a new state shows it raw instead of
+ * crashing the screen.
+ *
+ * `code` is only present once the bot has written it, and is only shown while the status is
+ * 'code_generated'. `expiresAt` is the moment the request stops being claimable.
+ */
+export type WhatsAppPairing = {
+  id: number;
+  phone: string;
+  status: string;
+  code: string | null;
+  error: string | null;
+  expiresAt: number;
+  createdAt: number;
+};
+
+/**
+ * One WhatsApp number linked to the account.
+ *
+ * `id` is the bot's session id — always the literal string 'web_' followed by the phone
+ * number, which is also how the row is attributed to a user. `status` is the bot's last word
+ * on the session: 'connected', or 'disconnected' once it has gone away. A disconnected row is
+ * dropped from the list rather than deleted.
+ */
+export type WhatsAppSession = {
+  id: string;
+  phone: string;
+  status: string;
+  updatedAt: number;
+};

@@ -474,3 +474,54 @@ create table if not exists vx_call_signals (
 
 -- Reading is always "the signals for this call, after this cursor".
 create index if not exists vx_call_signals_call on vx_call_signals (call_id, seq);
+
+/* ── whatsapp pairing (an external bot links the number) ──────────────── */
+
+-- One row per "Link WhatsApp" request. An external bot process -- not this app -- polls this
+-- table, so the table and column names below are that process's contract and must not be
+-- renamed: it claims the oldest live pending row, writes a pairing code, then marks the
+-- request connected or failed. `status` moves pending -> processing -> code_generated ->
+-- connected, or aside to failed, or to expired once `expires_at` has passed. `id` is a serial
+-- because the bot claims the oldest row with `order by id asc` and returns it.
+--
+-- `user_id` and `created_at` are not in the bot's statements. It ignores columns it does not
+-- name, and Varnox needs them to know whose request a row is and to date its own screen.
+--
+-- Keep the semicolon character out of these notes. This file is split on it before the
+-- statements reach Postgres, and one typed inside a comment cuts a statement in half.
+create table if not exists varnox_pairing_requests (
+  id           serial primary key,
+  user_id      text not null,
+  phone        text not null,
+  status       text not null default 'pending',
+  pairing_code text,
+  error        text,
+  expires_at   timestamptz not null,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+-- The bot claims "the oldest pending row that has not expired", which is this index.
+create index if not exists varnox_pairing_requests_status
+  on varnox_pairing_requests (status, expires_at);
+
+-- One account may only have one request in flight, and its screen reads its own rows by user.
+create index if not exists varnox_pairing_requests_user
+  on varnox_pairing_requests (user_id, updated_at desc);
+
+/* ── linked whatsapp sessions ─────────────────────────────────────────── */
+
+-- One row per linked WhatsApp number, as the bot records it. The bot's upsert names only
+-- id, phone, status and updated_at, so the primary key on id is what it needs and no user_id
+-- appears here: the bot never writes one, and a session is attributed to a user by joining to
+-- varnox_pairing_requests on 'web_' || phone = varnox_sessions.id.
+--
+-- `status` is whatever the bot last saw, 'connected' while it is live. A session the bot
+-- reports as 'disconnected' is filtered out of the list rather than deleted, so the row stays
+-- as history and this app never removes a row it does not own.
+create table if not exists varnox_sessions (
+  id         text primary key,
+  phone      text,
+  status     text,
+  updated_at timestamptz not null default now()
+);
