@@ -1,23 +1,43 @@
 /* ==========================================================================
    Varnox design system — messenger look and feel, Varnox's own branding.
 
-   Palette note: a dark, warm scheme — near-black browns for surfaces, one gold
-   for everything that carries emphasis, and a bright gold for read ticks. Warm
-   neutrals rather than grey ones, because a cool grey beside gold reads as dirty
-   and the two never quite settle together.
+   Palette note: a dark, warm scheme built to match a reference look — near-black
+   cards drawn with a thin gold outline, headings in an italic serif, buttons
+   outlined rather than filled, and values sitting in a faint gold wash. The rules
+   that carry those four habits are collected under "the gold language" at the end
+   of this file.
 
-   Read ticks are brighter than the brand gold on purpose: the two ticks must tell
-   apart at a glance on a small screen, and a hue difference is quicker to see than
-   a lightness difference. Delivered ticks stay the muted neutral.
+   Two golds, doing two jobs. The brand gold is muted and low-chroma and is used for
+   outlines, glyphs and borders; the bright gold is used for text and values. Using
+   the bright one for everything makes a screen shout, and using the muted one for
+   text makes it unreadable on a dark card.
+
+   Warm neutrals rather than grey ones, because a cool grey beside gold reads as
+   dirty and the two never quite settle together. The one deliberate exception is
+   the presence dot, which stays green: green-for-online is read at a glance from
+   muscle memory, and a gold dot would be indistinguishable from the accent.
 
    No third-party logo, name or artwork is used anywhere in this app. The backdrop
    photograph is the operator's own file, served from /fire-bg.jpg.
    ========================================================================== */
 
 :root {
-  --brand: #e6b84a;
-  --brand-strong: #c99a2e;
-  --brand-soft: rgba(230, 184, 74, 0.16);
+  /* A muted antique gold, not a bright one. This is the colour of the outlines in the
+     reference, and it is deliberately low-chroma: the bright gold is reserved for text
+     and values, which is what stops the whole screen shouting. */
+  --brand: #d4b04a;
+  --brand-strong: #b8912f;
+  --brand-soft: rgba(212, 176, 74, 0.16);
+  /* The bright gold for headings and values, and the faint wash that sits behind them.
+     One gold cannot do both jobs — the wash has to stay quiet on a dark card while the
+     text on top of it has to stay bright. Both are theme tokens, because the pale theme
+     needs a deeper gold to hold contrast against cream. */
+  --gold-bright: #f0cd6a;
+  --gold-tint: rgba(212, 176, 74, 0.12);
+  /* Headings only. The reference sets its titles in an italic serif, and that is most of
+     its character — but only its titles. The body stays on the sans stack: a chat list is
+     small text, and a serif at 13px is measurably harder to read at that size. */
+  --font-display: Georgia, 'Times New Roman', 'Noto Serif', serif;
   /* Ink for anything filled with the brand gold — badges, the send button, primary
      buttons, the floating action button. White on this gold measures 1.8:1, which is
      unreadable, so every gold fill takes this dark brown instead. It is deliberately
@@ -34,58 +54,70 @@
 }
 
 html[data-theme='light'] {
-  --app-bg: #ece2cd;
-  --panel: #fffdf8;
-  --panel-2: #f7f0e1;
-  --panel-3: #f7f0e1;
-  --panel-4: #efe6d1;
-  --line: rgba(84, 63, 22, 0.14);
-  --line-strong: rgba(84, 63, 22, 0.24);
+  /* A deep gold in this theme, not the dark one's bright gold. The bright gold on cream
+     is only about 2.4:1 — every outlined button, gold label and value would be unreadable
+     — so the whole gold ramp shifts down and the wash shifts with it. */
+  /* One deep gold here rather than the dark theme's two. At this end of the ramp the
+     muted and the bright gold converge — the muted one has to come down far enough to be
+     visible on cream that it lands on the same value, so keeping two would only be a
+     distinction without a difference. */
+  --brand: #8a6410;
+  --brand-strong: #7d5c14;
+  --brand-soft: rgba(138, 100, 16, 0.14);
+  --gold-bright: #8a6410;
+  --gold-tint: rgba(138, 100, 16, 0.12);
+  --app-bg: #efe6d2;
+  --panel: #fffdf7;
+  --panel-2: #f8f1e1;
+  --panel-3: #f8f1e1;
+  --panel-4: #efe5cd;
+  --line: rgba(158, 118, 28, 0.3);
+  --line-strong: rgba(158, 118, 28, 0.52);
   --text: #241c0c;
-  --muted: #7d6a48;
+  --muted: #7a6845;
   --header: #2b2110;
-  --header-text: #f8e6b4;
+  --header-text: #f4dfa4;
   --header-muted: #cdb582;
   --bubble-in: #ffffff;
-  --bubble-out: #fbeecb;
-  --chat-bg: #f6efe0;
+  --bubble-out: #fbf0d2;
+  --chat-bg: #f7f0e2;
   --doodle: #c6b087;
-  /* A deeper gold than the brand, so a link stays legible on the pale outgoing
-     bubble instead of glowing out of it. */
   --link: #8a6410;
-  --hover: rgba(84, 63, 22, 0.06);
+  --hover: rgba(158, 118, 28, 0.07);
   --shadow: 0 1px 1px rgba(84, 63, 22, 0.18);
   --shadow-lg: 0 12px 32px rgba(84, 63, 22, 0.24);
   --badge-text: var(--on-brand);
-  /* Bright gold is invisible against the pale outgoing bubble in this theme — 1.25:1 — so
-     the read tick darkens to the same gold used for links here. The dark theme keeps the
-     bright one. */
   --tick-read: #8a6410;
 }
 
 html[data-theme='dark'] {
-  --app-bg: #0a0805;
-  --panel: #14110b;
-  --panel-2: #1d1810;
-  --panel-3: #1d1810;
-  --panel-4: #292216;
-  --line: rgba(230, 184, 74, 0.16);
-  --line-strong: rgba(230, 184, 74, 0.32);
-  --text: #f4e8cf;
-  --muted: #a5906a;
-  --header: #1a1509;
-  --header-text: #f6d98a;
-  --header-muted: #b99f66;
-  --bubble-in: #1d1810;
-  --bubble-out: #3b2f12;
-  --chat-bg: #0b0906;
-  --doodle: #6b5626;
-  --link: #f0c75e;
-  --hover: rgba(230, 184, 74, 0.08);
-  --shadow: 0 1px 1px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+  /* Near-black, very slightly warm. The reference's cards are almost black; the warmth is
+     a few points of red, which is enough to keep them from reading as a cold grey beside
+     the gold. */
+  --app-bg: #0b0a07;
+  --panel: #100e0a;
+  --panel-2: #16130d;
+  --panel-3: #16130d;
+  --panel-4: #1e1a12;
+  /* The outline. Higher than a hairline and well below a hard edge — the reference's
+     borders are visible at a glance but never bright. */
+  --line: rgba(212, 176, 74, 0.32);
+  --line-strong: rgba(212, 176, 74, 0.58);
+  --text: #e6e1d6;
+  --muted: #9a9384;
+  --header: #12100b;
+  --header-text: #f0cd6a;
+  --header-muted: #b39a5c;
+  --bubble-in: #16130d;
+  --bubble-out: #241e0e;
+  --chat-bg: #0b0a07;
+  --doodle: #6b5a2c;
+  --link: #f0cd6a;
+  --hover: rgba(212, 176, 74, 0.09);
+  --shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.65);
   --badge-text: var(--on-brand);
-  --tick-read: #ffd166;
+  --tick-read: #f0cd6a;
 }
 
 * {
@@ -295,7 +327,7 @@ a {
   font-weight: 600;
 }
 html[data-theme='dark'] .filter-chip.on {
-  color: #6ee0bc;
+  color: var(--gold-bright);
 }
 
 .chat-list {
@@ -312,7 +344,7 @@ html[data-theme='dark'] .filter-chip.on {
   font-weight: 600;
 }
 html[data-theme='dark'] .list-label {
-  color: #6ee0bc;
+  color: var(--gold-bright);
 }
 
 .chat-item {
@@ -368,7 +400,7 @@ html[data-theme='dark'] .chat-item.active {
   font-weight: 600;
 }
 html[data-theme='dark'] .chat-item-time.unread {
-  color: #6ee0bc;
+  color: var(--gold-bright);
 }
 
 .chat-item-bottom {
@@ -714,7 +746,7 @@ html[data-theme='dark'] .bubble .reply {
   font-size: 12.6px;
 }
 html[data-theme='dark'] .bubble .reply b {
-  color: #6ee0bc;
+  color: var(--gold-bright);
 }
 .bubble .reply span {
   color: var(--muted);
@@ -897,7 +929,7 @@ html[data-theme='dark'] .bubble .reply b {
   flex: none;
 }
 html[data-theme='dark'] .file-card .ic {
-  color: #6ee0bc;
+  color: var(--gold-bright);
 }
 .file-card .body {
   flex: 1;
@@ -938,7 +970,7 @@ html[data-theme='dark'] .file-card .ic {
   align-self: flex-start;
 }
 html[data-theme='dark'] .map-card .map-open {
-  color: #6ee0bc;
+  color: var(--gold-bright);
 }
 
 /* contact card */
@@ -962,7 +994,7 @@ html[data-theme='dark'] .map-card .map-open {
   flex: none;
 }
 html[data-theme='dark'] .contact-card .avatar {
-  color: #6ee0bc;
+  color: var(--gold-bright);
 }
 .contact-card .body {
   flex: 1;
@@ -1128,7 +1160,7 @@ html[data-theme='light'] .attach-sheet {
   place-items: center;
 }
 html[data-theme='dark'] .attach-ic {
-  color: #6ee0bc;
+  color: var(--gold-bright);
 }
 .attach-contact {
   display: flex;
@@ -1232,7 +1264,7 @@ html[data-theme='dark'] .sel-bar {
   background: var(--panel);
 }
 html[data-theme='dark'] .empty {
-  background: #222e35;
+  background: var(--panel-2);
 }
 .empty h1 {
   margin: 0;
@@ -1455,7 +1487,7 @@ html[data-theme='light'] .input {
   font-weight: 600;
 }
 html[data-theme='dark'] .tag {
-  color: #6ee0bc;
+  color: var(--gold-bright);
 }
 
 .toast {
@@ -1534,7 +1566,7 @@ html[data-theme='dark'] .tag {
   font-weight: 600;
 }
 html[data-theme='dark'] .settings-group .label {
-  color: #6ee0bc;
+  color: var(--gold-bright);
 }
 .settings-row {
   display: flex;
@@ -1738,7 +1770,7 @@ html[data-theme='dark'] .wall-preview[data-w='doodle'] {
   color: var(--brand-strong);
 }
 html[data-theme='dark'] .search-hit b {
-  color: #6ee0bc;
+  color: var(--gold-bright);
 }
 .search-hit span {
   color: var(--muted);
@@ -1837,7 +1869,7 @@ html[data-theme='dark'] .search-hit b {
   font-weight: 600;
 }
 html[data-theme='dark'] .switch-line button {
-  color: #6ee0bc;
+  color: var(--gold-bright);
 }
 
 /* ----------------------------------------------------------------- misc */
@@ -2203,7 +2235,7 @@ html[data-theme='dark'] .switch-line button {
   z-index: 70;
   display: flex;
   flex-direction: column;
-  background: #05090c;
+  background: #0b0a07;
   color: #f2f5f7;
   transition: transform 0.12s ease-out;
 }
@@ -2380,7 +2412,7 @@ html[data-theme='dark'] .switch-line button {
     color: var(--brand-strong);
   }
   html[data-theme='dark'] .tab-bar button.on {
-    color: #6ee0bc;
+    color: var(--gold-bright);
   }
 }
 
@@ -2422,7 +2454,7 @@ html[data-theme='dark'] .switch-line button {
   opacity: 0.45;
 }
 html[data-theme='dark'] .ch-round {
-  color: #6ee0bc;
+  color: var(--gold-bright);
 }
 
 /* The tile that stands where a channel has no picture yet — the same size as the avatar it
@@ -2439,7 +2471,7 @@ html[data-theme='dark'] .ch-round {
   color: var(--brand-strong);
 }
 html[data-theme='dark'] .ch-ic {
-  color: #6ee0bc;
+  color: var(--gold-bright);
 }
 
 /* The bold unread dot. Presence rather than a count: a broadcast is not addressed to you, so
@@ -2452,7 +2484,7 @@ html[data-theme='dark'] .ch-ic {
   background: var(--brand);
 }
 html[data-theme='dark'] .ch-dot {
-  background: #6ee0bc;
+  background: var(--gold-bright);
 }
 
 /* The follow button in the discover sheet: small enough to sit in a row beside a name. */
@@ -2660,7 +2692,7 @@ html[data-theme='light'] .ch-post {
   color: var(--brand-strong);
 }
 html[data-theme='dark'] .call-dir {
-  color: #6ee0bc;
+  color: var(--gold-bright);
 }
 .call-dir.missed {
   background: rgba(241, 92, 109, 0.16);
@@ -2939,4 +2971,119 @@ html[data-theme='dark'] .chat-pane {
    selectors are more specific than this — so dots, grid and leaf keep working. */
 html[data-theme='dark'] .chat-bg-pattern {
   opacity: 0.07;
+}
+
+
+/* ==========================================================================
+   The gold language
+
+   Matching a reference look rather than merely tinting the app gold. The reference has
+   four habits, and those habits are what make it recognisable:
+
+     one    near-black cards drawn with a thin gold outline, generous corner radius
+     two    headings set in an italic serif, in gold
+     three  buttons outlined in gold rather than filled with it
+     four   values and states sitting in a faint gold wash
+
+   These are additive rules rather than edits to the rules above, so that the geometry the
+   rest of the stylesheet computes is untouched: only the paint changes. Where a rule above
+   is genuinely replaced — the filled button — it is replaced outright and said so.
+   ========================================================================== */
+
+/* One ── the outlined card. The outline is what separates a card from the ground, so the
+   shadow is eased off where it would only blur the edge the border is already drawing. */
+.sheet,
+.auth-card,
+.emoji-panel,
+.attach-sheet,
+.search-box,
+.terms-box,
+.otp-box,
+.file-card,
+.map-card,
+.contact-card {
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  box-shadow: none;
+}
+/* The sheet header keeps the card's top corners, so the outline still reads as one card
+   rather than a box with a lid sitting on it. */
+.sheet-head {
+  border-radius: 15px 15px 0 0;
+}
+
+/* Two ── the serif italic heading, and only where something is genuinely a title: the app
+   name, a screen title, a sheet title, the sign-in heading, the section labels. */
+.brand-name,
+.sc-title,
+.sheet-head h3,
+.auth-card h1,
+.list-label {
+  font-family: var(--font-display);
+  font-style: italic;
+  color: var(--gold-bright);
+}
+.list-label {
+  font-weight: 400;
+}
+
+/* Three ── the outlined button. This one replaces the filled rule above outright: the
+   reference outlines its call to action and lets the gold come through the border and the
+   label instead of flooding the shape with it. */
+.btn {
+  background: transparent;
+  border: 1px solid var(--brand);
+  color: var(--gold-bright);
+}
+.btn.ghost {
+  background: transparent;
+  border-color: var(--line-strong);
+  color: var(--muted);
+}
+.btn.danger {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  color: var(--danger);
+}
+/* The round icon buttons take the same treatment. They keep their size: box-sizing is
+   border-box globally, so the 1px border is taken out of the padding rather than added
+   to the 44px. */
+.send-btn,
+.fab,
+.ch-send,
+.updates-plus,
+.voice button.play {
+  background: transparent;
+  border: 1px solid var(--brand);
+  color: var(--brand);
+}
+
+/* Four ── the gold wash, for chips, the unread badge and the selected segment. */
+.badge,
+.chip,
+.seg.on {
+  background: var(--gold-tint);
+  border: 1px solid var(--line-strong);
+  color: var(--gold-bright);
+}
+/* Transparent rather than absent, so choosing a segment does not resize it by the width of
+   the border that appears. */
+.seg {
+  border: 1px solid transparent;
+}
+
+/* The reference draws its tiles as outlined squares with a gold glyph, so the attachment
+   icons follow: a rounded square, no fill, a gold border and a gold glyph. */
+.attach-ic {
+  border-radius: 14px;
+  background: transparent;
+  border: 1px solid var(--brand);
+  color: var(--brand);
+}
+
+/* An outgoing message takes the faint wash and a hairline of the outline, so a sent bubble
+   reads as gold without becoming a solid block of it — a filled gold bubble would drown
+   the text it is carrying. */
+html[data-theme='dark'] .bubble.tail-out {
+  border: 1px solid var(--line);
 }
