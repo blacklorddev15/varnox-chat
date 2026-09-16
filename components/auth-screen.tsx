@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { patch, post, uploadImage } from '@/lib/client';
+import { api, patch, post, uploadImage } from '@/lib/client';
 import { Avatar } from './avatar';
 import { IconLogo } from './icons';
 
@@ -126,6 +126,10 @@ export function AuthScreen({ next }: { next?: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  /* The recorded code, once somebody asks to see it. Null means they have not asked. */
+  const [devSms, setDevSms] = useState<{ body: string; code: string | null } | null>(null);
+  const [smsBusy, setSmsBusy] = useState(false);
+  const [smsCopied, setSmsCopied] = useState(false);
 
   const boxes = useRef<Array<HTMLInputElement | null>>([]);
 
@@ -183,12 +187,53 @@ export function AuthScreen({ next }: { next?: string }) {
       );
       setDigits(Array(CODE_LENGTH).fill(''));
       setNotice(`We sent a 6-digit code to ${res.to}`);
+      setDevSms(null);
+      setSmsCopied(false);
       setSeconds(res.resendInSec || 60);
       setStep('code');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
       setBusy(false);
+    }
+  }
+
+  /**
+   * Ask for the code that was recorded instead of texted.
+   *
+   * The server decides what may be shown: a code comes back only for a number that has no
+   * account yet, so this can help somebody join but can never reach into an existing account.
+   * Everything the server declines arrives as "nothing to show", which is what the screen says.
+   */
+  async function loadDevSms() {
+    if (smsBusy) return;
+    setSmsBusy(true);
+    setError('');
+    try {
+      const res = await api<{ available: boolean; body?: string; code?: string | null }>(
+        `/api/auth/otp/inbox?phone=${encodeURIComponent(composed())}`
+      );
+      if (!res.available || !res.body) {
+        setError('There is no code to show for this number.');
+        return;
+      }
+      setDevSms({ body: res.body, code: res.code ?? null });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not look that up');
+    } finally {
+      setSmsBusy(false);
+    }
+  }
+
+  async function copyDevSms() {
+    if (!devSms) return;
+    try {
+      await navigator.clipboard.writeText(devSms.code ?? devSms.body);
+      setSmsCopied(true);
+      window.setTimeout(() => setSmsCopied(false), 2000);
+    } catch {
+      /* Some browsers refuse the clipboard without a secure context or a direct gesture. */
+      setError('Could not copy — select the code above and copy it by hand.');
     }
   }
 
@@ -540,6 +585,34 @@ export function AuthScreen({ next }: { next?: string }) {
                 {busy ? 'Checking…' : 'Confirm'}
               </button>
             </form>
+
+            {/* There is no SMS to check, so the phone step's promise is kept here instead.
+                What may be shown is the server's decision, never this screen's. */}
+            {devSms ? (
+              <div className="dev-sms">
+                <p className="dev-sms-label">Your code</p>
+                {devSms.code ? <p className="dev-sms-code">{devSms.code}</p> : null}
+                <p className="dev-sms-body">{devSms.body}</p>
+                <div className="dev-sms-actions">
+                  <button type="button" className="btn ghost" onClick={() => void copyDevSms()}>
+                    {smsCopied ? 'Copied' : 'Copy'}
+                  </button>
+                  {devSms.code ? (
+                    <button
+                      type="button"
+                      className="btn ghost"
+                      onClick={() => setDigits((devSms.code ?? '').split(''))}
+                    >
+                      Use this code
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <button type="button" className="dev-sms-link" onClick={() => void loadDevSms()}>
+                {smsBusy ? 'Looking…' : 'Show the code instead'}
+              </button>
+            )}
 
             <div className="switch-line">
               {seconds > 0 ? (

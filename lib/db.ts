@@ -3253,3 +3253,44 @@ export async function listBotThread(
     at: toEpochMs(r.created_at),
   }));
 }
+
+/* ── the code shown when there is no SMS to send it with ───────────────────── */
+
+/** How long a recorded code stays readable. Matches the code's own life (OTP_TTL_MS). */
+const DEV_CODE_WINDOW_MS = 10 * 60_000;
+
+/**
+ * The code just made for a number that has no account yet, if there is one.
+ *
+ * The `not exists` clause is the whole safety argument, and it belongs in the query rather than
+ * in the route so it cannot be forgotten at a call site. Without it anybody who knows a phone
+ * number could read its code here, and the code step is also how you sign IN — so that is every
+ * account on the platform entered with nothing but a number. Requiring no account means a code
+ * read here can create an account but never enter one.
+ *
+ * The time window is the second condition: an old row cannot be replayed after the code it
+ * carries has stopped working.
+ *
+ * Returns null for every refusal, so the caller cannot tell "already registered" from "no code
+ * yet" — and neither can anybody probing it.
+ */
+export async function devCodeForNewNumber(
+  phone: string
+): Promise<{ body: string; at: number } | null> {
+  if (!phone) return null;
+
+  const rows = await q<{ body: string; created_at: number }>(
+    `select o.body, o.created_at
+       from vx_sms_outbox o
+      where o.to_phone = $1
+        and o.created_at > $2
+        and not exists (select 1 from vx_users u where u.phone = $1)
+      order by o.created_at desc, o.id desc
+      limit 1`,
+    [phone, Date.now() - DEV_CODE_WINDOW_MS]
+  );
+
+  const row = rows[0];
+  return row ? { body: row.body, at: Number(row.created_at) } : null;
+}
+
