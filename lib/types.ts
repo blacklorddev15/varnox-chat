@@ -502,3 +502,21 @@ export type BotThreadMessage = {
   mediaBytes: number | null;
   at: number;
 };
+
+/**
+ * One message in the dev SMS inbox: what a login code would have been texted as.
+ *
+ * `ok` and `error` are filled in even in dev mode, so a row reads the same as a real attempt
+ * would and the screen can show what a provider failure looks like.
+ */
+export type SmsOutboxEntry = {
+  id: number;
+  /** The number the code was generated for. */
+  to: string;
+  /** The message text. This contains the live code — that is the point of the screen. */
+  body: string;
+  provider: string;
+  ok: boolean;
+  error: string | null;
+  at: number;
+};

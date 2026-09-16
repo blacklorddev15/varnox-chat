@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type {
   PrivacyWho,
   PublicUser,
@@ -8,6 +8,7 @@ import type {
   UserSettings,
   WallpaperId,
 } from '@/lib/types';
+import { api } from '@/lib/client';
 import { formatPhone } from '@/lib/phone';
 import { Avatar } from './avatar';
 import {
@@ -51,6 +52,7 @@ export function SettingsScreen({
   onEditProfile,
   onLinkedDevices,
   onLinkWhatsApp,
+  onOpenSmsInbox,
   onSignOut,
   onOpenStarred,
   onToast,
@@ -62,12 +64,30 @@ export function SettingsScreen({
   onEditProfile: () => void;
   onLinkedDevices: () => void;
   onLinkWhatsApp: () => void;
+  /** Only ever reachable on a server running SMS dev mode, with the account allowlisted. */
+  onOpenSmsInbox: () => void;
   onSignOut: () => void;
   onOpenStarred: () => void;
   onToast: (message: string) => void;
 }) {
   const [section, setSection] = useState<'root' | 'privacy' | 'wallpaper' | 'notifications'>('root');
   const [busy, setBusy] = useState(false);
+  /* Whether the SMS inbox exists for this account. Asked rather than inferred, because the
+     server refuses it for almost everybody and a row that leads to a refusal is worse than no
+     row at all. It fails closed: any error leaves the row hidden. */
+  const [smsInbox, setSmsInbox] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void api<{ available: boolean }>('/api/sms/outbox')
+      .then((res) => {
+        if (alive) setSmsInbox(Boolean(res.available));
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   async function askNotifications(next: boolean) {
     if (!next) {
@@ -166,6 +186,17 @@ export function SettingsScreen({
                   <small>Pair a WhatsApp number with the bot that answers for it</small>
                 </span>
               </button>
+              {smsInbox ? (
+                <button type="button" className="settings-row" onClick={onOpenSmsInbox}>
+                  <span className="ic">
+                    <IconChat />
+                  </span>
+                  <span className="txt">
+                    SMS inbox
+                    <small>Codes from dev mode, so a registration can finish without SMS</small>
+                  </span>
+                </button>
+              ) : null}
             </div>
 
             <div className="settings-group">

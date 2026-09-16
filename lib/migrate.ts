@@ -392,6 +392,25 @@ export const STEPS: Step[] = [
     label: 'vx_call_signals.to_id',
     sql: `alter table vx_call_signals add column if not exists to_id text`,
   },
+  {
+    kind: 'table',
+    label: 'vx_sms_outbox',
+    sql: `create table if not exists vx_sms_outbox (
+            id         bigserial primary key,
+            to_phone   text    not null,
+            body       text    not null,
+            provider   text    not null,
+            ok         boolean not null default true,
+            error      text,
+            created_at bigint  not null
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_sms_outbox_recent',
+    sql: `create index if not exists vx_sms_outbox_recent
+            on vx_sms_outbox (created_at desc)`,
+  },
 ];
 
 /** A request waits this long for reconciliation, then carries on without it. */

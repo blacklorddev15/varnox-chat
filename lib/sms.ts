@@ -15,11 +15,13 @@
 
 type Provider = 'console' | 'twilio' | 'vonage' | 'messagebird' | 'generic';
 
+import { q } from './pg';
+
 export type SmsResult = { ok: boolean; provider: Provider; error?: string };
 
 const PROVIDERS: Provider[] = ['console', 'twilio', 'vonage', 'messagebird', 'generic'];
 
-function devMode(): boolean {
+export function devMode(): boolean {
   return process.env.SMS_DEV_MODE === '1';
 }
 
@@ -59,6 +61,69 @@ async function fetchJson(
  * route must not report success for an SMS that never left. On failure it returns
  * `ok: false` with a message safe to show a user.
  */
+/**
+ * Record a message in the dev inbox.
+ *
+ * Reached from exactly one place — the dev-mode branch — so that "written only in dev mode" and
+ * "readable only in dev mode" are the same condition and cannot drift apart.
+ *
+ * That is the entire safety argument. The body carries a live login code, and vx_otp stores only
+ * code_hash, so recording anywhere that actually sends would put plaintext codes into the
+ * database and undo the thing that design exists for. The console provider deliberately does not
+ * record either: it sends nothing, but it is selectable in production, and a second write path
+ * would mean the invariant held only by convention.
+ *
+ * To use this, set SMS_DEV_MODE — not SMS_PROVIDER=console.
+ *
+ * It cannot throw. A diagnostics table must never be able to stop somebody logging in, so a
+ * failure here is logged and swallowed.
+ */
+async function recordOutbox(
+  phone: string,
+  body: string,
+  provider: Provider,
+  result: SmsResult
+): Promise<void> {
+  try {
+    await q(
+      `insert into vx_sms_outbox (to_phone, body, provider, ok, error, created_at)
+       values ($1, $2, $3, $4, $5, $6)`,
+      [phone, body, provider, result.ok, result.error ?? null, Date.now()]
+    );
+  } catch (err) {
+    console.error(
+      '[varnox] could not record the SMS dev inbox entry',
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
+/**
+ * May this account read the dev SMS inbox?
+ *
+ * Pulled out of the route so it can be tested directly, because it is the one decision standing
+ * between a signed-in stranger and every live login code on the platform. A rule that important
+ * should not be reachable only through an HTTP handler that needs a session to exercise.
+ *
+ * False unless both hold: dev mode is on, and the username is in SMS_INBOX_USERNAMES. An empty
+ * or missing list allows nobody — failing closed matters more than being convenient here, since
+ * the opposite failure hands over every account.
+ *
+ * An environment allowlist rather than a column on the user row, and deliberately: a column can
+ * be granted by anything that can write to the database — a bug in another route, a leaked
+ * connection string — and granting it would be enough to read codes. An env var cannot be set
+ * from a query.
+ */
+export function mayReadSmsInbox(username: string | null | undefined): boolean {
+  if (!devMode()) return false;
+  const allowed = (process.env.SMS_INBOX_USERNAMES ?? '')
+    .split(',')
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean);
+  if (!allowed.length) return false;
+  return allowed.includes(String(username ?? '').trim().toLowerCase());
+}
+
 export async function sendLoginCode(
   phone: string,
   code: string,
@@ -71,7 +136,9 @@ export async function sendLoginCode(
   // while sending nothing.
   if (devMode()) {
     console.log(`[varnox] SMS dev mode — code for ${phone}: ${code}`);
-    return { ok: true, provider: 'console' };
+    const result: SmsResult = { ok: true, provider: 'console' };
+    await recordOutbox(phone, text, 'console', result);
+    return result;
   }
 
   const which = configured();

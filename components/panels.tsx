@@ -2,12 +2,19 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, del, post, uploadImage } from '@/lib/client';
-import type { ChatRow, Device, PublicUser, WhatsAppPairing, WhatsAppSession } from '@/lib/types';
+import type {
+  ChatRow,
+  Device,
+  PublicUser,
+  SmsOutboxEntry,
+  WhatsAppPairing,
+  WhatsAppSession,
+} from '@/lib/types';
 import { presence, relativeTime } from '@/lib/format';
 import { formatPhone } from '@/lib/phone';
 import { Avatar } from './avatar';
 import { MediaGallery } from './overlays';
-import { IconCheck, IconClock, IconClose, IconLink, IconSearch } from './icons';
+import { IconChat, IconCheck, IconClock, IconClose, IconLink, IconSearch } from './icons';
 
 export function Sheet({
   title,
@@ -406,6 +413,74 @@ function deviceName(device: Device): string {
  * credential the other device presents, so one should not be sitting on screen (or in the
  * database) just because this panel was opened.
  */
+/**
+ * The dev SMS inbox.
+ *
+ * Shows the login codes that were generated while SMS dev mode is on. Nothing on this screen was
+ * texted to anybody — that is the point: it is what lets somebody finish a registration when
+ * there is no provider to send through.
+ *
+ * It asks the server first and draws nothing if the answer is no, rather than rendering an empty
+ * screen. Whether the account may see this at all is decided entirely by the route, and for
+ * almost every account the answer is no, because every row here is a live login code.
+ */
+export function SmsInboxPanel({ onClose }: { onClose: () => void }) {
+  const [messages, setMessages] = useState<SmsOutboxEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await api<{ available: boolean; messages?: SmsOutboxEntry[] }>(
+          '/api/sms/outbox'
+        );
+        if (!alive) return;
+        setMessages(res.messages ?? []);
+      } catch (err) {
+        if (alive) setError(err instanceof Error ? err.message : 'Could not load the inbox');
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return (
+    <Sheet title="SMS inbox" onClose={onClose}>
+      <p className="hint" style={{ marginBottom: 12 }}>
+        Codes generated while SMS dev mode is on. Nothing here was sent to a phone — the code is
+        shown so a registration can be finished without an SMS provider.
+      </p>
+
+      {loading ? <p className="hint">Loading…</p> : null}
+      {!loading && error ? <p className="hint">{error}</p> : null}
+      {!loading && !error && messages.length === 0 ? (
+        <p className="hint">Nothing yet. Ask for a code and it will appear here.</p>
+      ) : null}
+
+      {messages.map((entry) => (
+        <div key={entry.id} className="settings-row">
+          <span className="ic">
+            <IconChat />
+          </span>
+          <span className="txt">
+            {formatPhone(entry.to)}
+            <small>{entry.body}</small>
+            <small>
+              {relativeTime(entry.at)} · {entry.provider}
+              {entry.ok ? '' : ` · not sent: ${entry.error ?? 'unknown'}`}
+            </small>
+          </span>
+        </div>
+      ))}
+    </Sheet>
+  );
+}
+
 export function LinkedDevicesPanel({ onClose }: { onClose: () => void }) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);

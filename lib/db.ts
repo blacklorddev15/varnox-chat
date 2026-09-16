@@ -6,6 +6,7 @@ import { q } from './pg';
 import { looksLikePhone, phoneKey } from './phone';
 import type {
   BotThreadMessage,
+  SmsOutboxEntry,
   Call,
   CallParticipant,
   CallSignal,
@@ -3251,5 +3252,42 @@ export async function listBotThread(
     mediaId: r.media_id === null ? null : Number(r.media_id),
     mediaBytes: r.byte_size === null ? null : Number(r.byte_size),
     at: toEpochMs(r.created_at),
+  }));
+}
+
+/* ── the dev SMS inbox ─────────────────────────────────────────────────────── */
+
+/**
+ * The messages a login code would have been sent as.
+ *
+ * Newest first and bounded — this is a debugging view, not a mail client, so there is no
+ * pagination to build. Who may read it is decided entirely by the route, which is expected to
+ * refuse almost everyone: every row here carries a live login code.
+ */
+export async function listSmsOutbox(limit = 50): Promise<SmsOutboxEntry[]> {
+  const size = Math.min(Math.max(Number(limit) || 50, 1), 200);
+  const rows = await q<{
+    id: number;
+    to_phone: string;
+    body: string;
+    provider: string;
+    ok: boolean;
+    error: string | null;
+    created_at: number;
+  }>(
+    `select id, to_phone, body, provider, ok, error, created_at
+       from vx_sms_outbox
+      order by created_at desc, id desc
+      limit $1`,
+    [size]
+  );
+  return rows.map((row) => ({
+    id: Number(row.id),
+    to: row.to_phone,
+    body: row.body,
+    provider: row.provider,
+    ok: row.ok,
+    error: row.error,
+    at: Number(row.created_at),
   }));
 }

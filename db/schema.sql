@@ -680,3 +680,35 @@ create table if not exists varnox_bot_media (
 -- Points an answer at the picture it carried. Null for a plain text reply.
 alter table varnox_bot_outbound
   add column if not exists media_id bigint;
+
+/* ── the dev SMS inbox ─────────────────────────────────────────────────── */
+
+-- What a login code would have been texted as, for when there is no SMS provider to text it.
+--
+-- This table exists so a code can be read during registration instead of going to a phone, and
+-- it is only ever written in dev mode — where by definition nothing was sent. That condition is
+-- the whole safety argument. The body carries a live login code, and vx_otp deliberately stores
+-- only code_hash, so recording unconditionally would put plaintext codes back in the database
+-- and undo exactly what that design is for. The invariant to keep: this table is populated only
+-- where nothing is being sent.
+--
+-- Reading it is owner-only and refused outright in production. Every live code is in here, so
+-- anybody who can read it can take over any account by reading somebody else's row.
+--
+-- `ok` and `error` are filled in even in dev mode, so the row reads the same as a real attempt
+-- would and the screen can show what a provider failure would have looked like.
+--
+-- Keep the semicolon character out of these notes. This file is split on it before the
+-- statements reach Postgres, and one typed inside a comment cuts a statement in half.
+create table if not exists vx_sms_outbox (
+  id         bigserial primary key,
+  to_phone   text    not null,
+  body       text    not null,
+  provider   text    not null,
+  ok         boolean not null default true,
+  error      text,
+  created_at bigint  not null
+);
+
+-- The screen reads the newest rows first, and nothing else.
+create index if not exists vx_sms_outbox_recent on vx_sms_outbox (created_at desc);
