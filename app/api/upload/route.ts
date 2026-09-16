@@ -36,39 +36,56 @@ export async function POST(req: Request) {
     if (file.size > MAX_BYTES) return bad('Files must be smaller than 4 MB');
 
     const kind = String(form.get('kind') ?? 'auto');
-    const type = file.type || 'application/octet-stream';
-    const isImage = IMAGE_TYPES.includes(type);
-    const isAudio = AUDIO_TYPES.includes(type);
+
+    // A recording arrives as "audio/webm;codecs=opus" from Chrome and Android, or
+    // "audio/mp4;codecs=…" from Safari, and sometimes with no type at all. Comparing that
+    // whole string against an allowlist therefore rejects perfectly good voice notes, which
+    // is exactly what it used to do. Only the media type before the parameters is compared,
+    // and the bytes are what decide what the file actually is.
+    const declared = (file.type || '').split(';')[0].trim().toLowerCase();
+    const declaredImage = IMAGE_TYPES.includes(declared);
+    const declaredAudio = AUDIO_TYPES.includes(declared);
+
     const buffer = Buffer.from(await file.arrayBuffer());
+    const real = sniff(new Uint8Array(buffer.subarray(0, 16)));
+    const realImage = Boolean(real && IMAGE_TYPES.includes(real));
+    const realAudio = Boolean(real && AUDIO_TYPES.includes(real));
 
     let category: 'images' | 'voice' | 'docs' = 'docs';
-    if (kind === 'image' || (kind === 'auto' && isImage)) {
-      if (!isImage) return bad('Only JPG, PNG, WEBP or GIF images are supported');
-      // The bytes must actually be an image; the declared type is not trusted.
-      const real = sniff(new Uint8Array(buffer.subarray(0, 16)));
-      if (!real || !IMAGE_TYPES.includes(real)) {
-        return bad('That file is not a real image');
+    // Stored and echoed back as the sniffed type, so the message records what the file is
+    // rather than what the browser claimed.
+    let mime = declared || 'application/octet-stream';
+
+    if (kind === 'image' || (kind === 'auto' && (declaredImage || realImage))) {
+      if (!realImage) {
+        return bad(
+          declaredImage
+            ? 'That file is not a real image'
+            : 'Only JPG, PNG, WEBP or GIF images are supported'
+        );
       }
       category = 'images';
-    } else if (kind === 'audio' || (kind === 'auto' && isAudio)) {
-      if (!isAudio) return bad('Unsupported audio format');
-      const real = sniff(new Uint8Array(buffer.subarray(0, 16)));
-      if (!real || !AUDIO_TYPES.includes(real)) {
-        return bad('That file is not a real audio recording');
+      mime = String(real);
+    } else if (kind === 'audio' || (kind === 'auto' && (declaredAudio || realAudio))) {
+      if (!realAudio) {
+        return bad(
+          declaredAudio ? 'That file is not a real audio recording' : 'Unsupported audio format'
+        );
       }
       category = 'voice';
+      mime = String(real);
     }
 
     // Stored in Postgres and served back through /api/media/<id>. The extension is kept
     // on the URL so a direct link or a download saves with a sensible name.
-    const stored = await saveMedia(buffer, type);
-    const url = `${stored.url}.${extensionFor(type)}`;
+    const stored = await saveMedia(buffer, mime);
+    const url = `${stored.url}.${extensionFor(mime)}`;
 
     return ok(
       {
         url,
         size: file.size,
-        mime: type,
+        mime,
         name: file.name || 'file',
         category,
       },
