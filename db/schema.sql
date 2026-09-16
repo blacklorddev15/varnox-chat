@@ -326,3 +326,39 @@ create table if not exists vx_link_codes (
   consumed_at    bigint,
   consumed_agent text
 );
+
+/* ── updates (status) ─────────────────────────────────────────────────── */
+
+-- A short-lived post: one row per update, and every read filters on `expires_at`, so a row
+-- that has passed its 24 hours is simply invisible everywhere. Nothing deletes it on a
+-- schedule — the filter is what makes it short-lived, and a row survives only as history.
+--
+-- `kind` is 'text' or 'image'. A text update stores no media and carries `bg` (one of the
+-- composer's dark swatches) so it still renders as a coloured card; a photo update stores
+-- `media_url` and may carry a caption in `text`.
+create table if not exists vx_status (
+  id         text primary key,
+  user_id    text not null,
+  kind       text not null,
+  text       text,
+  media_url  text,
+  bg         text,
+  created_at bigint not null,
+  expires_at bigint not null
+);
+
+-- Every feed read filters on expiry, so this is the index that matters.
+create index if not exists vx_status_expires on vx_status (expires_at);
+
+/* ── who has viewed an update ─────────────────────────────────────────── */
+
+-- One row per viewer per update. The primary key is what makes "mark as seen" idempotent —
+-- the insert is an `on conflict do nothing`, so re-opening an item writes nothing. These rows
+-- are also what the author's own "viewed by" list is built from, which is why the route that
+-- reads them is restricted to the update's author.
+create table if not exists vx_status_views (
+  status_id text not null,
+  viewer_id text not null,
+  viewed_at bigint not null,
+  primary key (status_id, viewer_id)
+);

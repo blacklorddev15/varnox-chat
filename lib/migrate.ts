@@ -136,6 +136,35 @@ const STEPS: Step[] = [
             consumed_agent text
           )`,
   },
+  {
+    kind: 'table',
+    label: 'vx_status',
+    sql: `create table if not exists vx_status (
+            id         text primary key,
+            user_id    text not null,
+            kind       text not null,
+            text       text,
+            media_url  text,
+            bg         text,
+            created_at bigint not null,
+            expires_at bigint not null
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_status_expires',
+    sql: `create index if not exists vx_status_expires on vx_status (expires_at)`,
+  },
+  {
+    kind: 'table',
+    label: 'vx_status_views',
+    sql: `create table if not exists vx_status_views (
+            status_id text not null,
+            viewer_id text not null,
+            viewed_at bigint not null,
+            primary key (status_id, viewer_id)
+          )`,
+  },
 ];
 
 /** A request waits this long for reconciliation, then carries on without it. */

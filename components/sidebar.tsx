@@ -4,9 +4,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatRow, PublicUser, UserSettings } from '@/lib/types';
 import { listStamp, shortPreview } from '@/lib/format';
 import { Avatar } from './avatar';
+import { UpdatesScreen } from './updates';
 import {
   IconArchive,
   IconBellOff,
+  IconChat,
   IconCheck,
   IconDoc,
   IconDoubleCheck,
@@ -23,6 +25,7 @@ import {
   IconSettings,
   IconStar,
   IconSun,
+  IconUpdates,
 } from './icons';
 
 export function Sidebar({
@@ -33,6 +36,9 @@ export function Sidebar({
   ready,
   selectedId,
   filter,
+  tab,
+  onTab,
+  onToast,
   onFilter,
   onSelectChat,
   onNewChat,
@@ -53,6 +59,10 @@ export function Sidebar({
   ready: boolean;
   selectedId: string | null;
   filter: 'all' | 'unread' | 'groups';
+  /** Which of the two phone tabs the sidebar is showing. Ignored on wide screens. */
+  tab: 'chats' | 'updates';
+  onTab: (tab: 'chats' | 'updates') => void;
+  onToast: (message: string) => void;
   onFilter: (f: 'all' | 'unread' | 'groups') => void;
   onSelectChat: (id: string) => void;
   onNewChat: () => void;
@@ -152,8 +162,10 @@ export function Sidebar({
     );
   }
 
-  return (
-    <aside className="sidebar">
+  /* Everything the sidebar has always been, unchanged: the phone tabs swap this out for the
+     updates screen rather than rebuilding the chat list. */
+  const chatsTab = (
+    <>
       <div className="sidebar-header">
         <button type="button" onClick={onProfile} title="Your profile" style={{ display: 'flex' }}>
           <Avatar name={me.displayName} src={me.avatar} size={40} />
@@ -334,6 +346,37 @@ export function Sidebar({
       <button type="button" className="fab" onClick={onNewChat} title="New chat">
         <IconNewChat size={24} />
       </button>
+    </>
+  );
+
+  return (
+    <aside className="sidebar">
+      {tab === 'updates' ? (
+        <UpdatesScreen me={me} onBack={() => onTab('chats')} onToast={onToast} />
+      ) : (
+        chatsTab
+      )}
+
+      {/* Phone layout only: the tab bar is hidden on wide screens, which keep the header and
+          always show the chat list. Channels and Calls join it later, each with its own tab. */}
+      <nav className="tab-bar">
+        <button
+          type="button"
+          className={tab === 'chats' ? 'on' : ''}
+          onClick={() => onTab('chats')}
+        >
+          <IconChat size={21} />
+          <span>Chats</span>
+        </button>
+        <button
+          type="button"
+          className={tab === 'updates' ? 'on' : ''}
+          onClick={() => onTab('updates')}
+        >
+          <IconUpdates size={21} />
+          <span>Updates</span>
+        </button>
+      </nav>
     </aside>
   );
 }

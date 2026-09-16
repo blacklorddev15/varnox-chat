@@ -161,6 +161,12 @@ export type WallpaperId = 'doodle' | 'plain' | 'dots' | 'grid' | 'leaf';
 
 export type PrivacyWho = 'everyone' | 'contacts' | 'nobody';
 
+/**
+ * Who may see a user's updates. There is no 'nobody': an update you post is meant to be seen,
+ * and 'chats' is the narrowest sensible audience — people you already have a direct chat with.
+ */
+export type StatusPrivacyWho = 'everyone' | 'chats';
+
 export type ChatPrefs = {
   pinned?: boolean;
   muted?: boolean;
@@ -175,6 +181,8 @@ export type UserSettings = {
     lastSeen: PrivacyWho;
     profilePhoto: PrivacyWho;
     readReceipts: boolean;
+    /** Audience for the updates tab; defaults to 'everyone'. */
+    statusPrivacy: StatusPrivacyWho;
   };
   chatPrefs: Record<string, ChatPrefs>;
   blocked: string[];
@@ -245,4 +253,36 @@ export type ChatRow = {
   pinned: boolean;
   muted: boolean;
   archived: boolean;
+};
+
+/**
+ * One short-lived post in the updates tab.
+ *
+ * `seen` and `viewCount` are relative to whoever asked for it: `seen` says whether *the
+ * viewer* has opened it, and `viewCount` is only ever filled in for the viewer's own
+ * updates, because only the author may know who watched.
+ */
+export type Status = {
+  id: string;
+  userId: string;
+  kind: 'text' | 'image';
+  text: string | null;
+  mediaUrl: string | null;
+  bg: string | null;
+  createdAt: number;
+  expiresAt: number;
+  seen: boolean;
+  viewCount: number;
+};
+
+/** One author's stack of updates, as the feed groups them. */
+export type StatusAuthor = {
+  user: PublicUser;
+  items: Status[];
+};
+
+/** One person who watched one of your updates. */
+export type StatusViewer = {
+  user: PublicUser;
+  viewedAt: number;
 };
