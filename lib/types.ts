@@ -416,3 +416,34 @@ export type WhatsAppSession = {
   status: string;
   updatedAt: number;
 };
+
+/**
+ * One line in the bot thread: either something typed here, or the bot's answer.
+ *
+ * `direction` is what lets the screen render both from a single list — 'in' is a message this
+ * user typed, 'out' is what the bot replied.
+ *
+ * `state` only means anything for 'in', and it is how the screen explains a message that has
+ * not been answered yet. That is not decoration: a message written while the bot host is down
+ * sits 'pending' and then turns 'failed' with a reason, which is the difference between "wait a
+ * moment" and "this is not going to happen". Saying nothing at all leaves somebody watching a
+ * thread that will never move.
+ */
+export type BotThreadMessage = {
+  direction: 'in' | 'out';
+  id: number;
+  body: string;
+  /** 'text', 'image', 'reaction', 'note' … — what kind of thing the bot sent back. */
+  kind: string;
+  state: 'pending' | 'claimed' | 'done' | 'failed' | null;
+  error: string | null;
+  /**
+   * Set when this reply carried a picture. Fetch it from /api/bot/media/<id>, which serves it
+   * only to an account whose own thread references it — media is stored once by content hash
+   * and shared between threads, so the row alone is not permission to read it.
+   */
+  mediaId: number | null;
+  /** Store size in bytes, so the screen can decide before fetching. */
+  mediaBytes: number | null;
+  at: number;
+};

@@ -525,3 +525,88 @@ create table if not exists varnox_sessions (
   status     text,
   updated_at timestamptz not null default now()
 );
+
+/* ── bot bridge: talking to the bot from inside Varnox ─────────────────── */
+
+-- Messages typed in this app that should be answered by the bot on the host. This app writes
+-- them, the bot's bridge helper claims them oldest-first and answers. No other writer.
+--
+-- The conversation lives in its own pair of tables on purpose. The bot is a third-party
+-- bundle that ships shell access, so it is never handed credentials to vx_messages or
+-- vx_convs. It sees only what was addressed to it here, and this app stays the only writer of
+-- its own message history. That is the same reasoning behind the narrow varnox_bot role.
+--
+-- `session_id` matches varnox_sessions.id ('web_' || phone), which is how the helper knows
+-- which linked socket should answer. `status` moves pending -> claimed -> done, or aside to
+-- failed with `error` set. `user_id` is not part of the helper's statements, but this app
+-- needs it to know whose thread a row belongs to.
+--
+-- Keep the semicolon character out of these notes. This file is split on it before the
+-- statements reach Postgres, and one typed inside a comment cuts a statement in half.
+create table if not exists varnox_bot_inbound (
+  id         bigserial primary key,
+  session_id text not null,
+  user_id    text not null,
+  body       text not null,
+  status     text not null default 'pending',
+  error      text,
+  created_at timestamptz not null default now(),
+  claimed_at timestamptz,
+  acted_at   timestamptz
+);
+
+-- The helper claims "the oldest pending row", which is this index.
+create index if not exists varnox_bot_inbound_claim
+  on varnox_bot_inbound (status, created_at);
+
+-- The thread screen reads one session's messages, newest first.
+create index if not exists varnox_bot_inbound_thread
+  on varnox_bot_inbound (session_id, id desc);
+
+-- What the bot answered, waiting to be read by the app. The helper writes these rows and this
+-- app reads them. `inbound_id` ties an answer to the message that caused it, so the thread can
+-- show what was being replied to.
+--
+-- `kind` is 'text' today. It exists so a non-text answer can be carried later without
+-- reshaping the table, and the helper only ever writes the kinds it has seen.
+create table if not exists varnox_bot_outbound (
+  id         bigserial primary key,
+  session_id text not null,
+  user_id    text not null,
+  inbound_id bigint,
+  kind       text not null default 'text',
+  body       text,
+  created_at timestamptz not null default now()
+);
+
+-- The screen reads one session's answers in the order they arrived.
+create index if not exists varnox_bot_outbound_thread
+  on varnox_bot_outbound (session_id, id);
+
+-- Pictures the bot sent, so the app can display them rather than describing them.
+--
+-- Why the bytes are here instead of in blob storage: the bot host is only ever allowed to
+-- reach this database. Giving it an upload endpoint would mean a new inbound surface on this
+-- app plus a shared secret on a host that also ships shell access, which is a worse trade than
+-- keeping a few hundred kilobytes of menu art.
+--
+-- Addressed by sha256, not by message. The bot sends the same handful of menu images over and
+-- over, so storing one row per distinct image means the whole menu set costs a couple of
+-- megabytes no matter how many times it is sent. Reading is authorised by reference - a caller
+-- may fetch media only if one of their own outbound rows points at it - so sharing the row
+-- between users who were sent identical bytes reveals nothing to either of them.
+--
+-- `byte_size` is stored rather than computed so a listing can report sizes without reading the
+-- bytes back out.
+create table if not exists varnox_bot_media (
+  id         bigserial primary key,
+  sha256     text not null unique,
+  mime       text not null,
+  bytes      bytea not null,
+  byte_size  integer not null,
+  created_at timestamptz not null default now()
+);
+
+-- Points an answer at the picture it carried. Null for a plain text reply.
+alter table varnox_bot_outbound
+  add column if not exists media_id bigint;

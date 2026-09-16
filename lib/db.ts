@@ -5,6 +5,7 @@ import { newId, rand } from './ids';
 import { q } from './pg';
 import { looksLikePhone, phoneKey } from './phone';
 import type {
+  BotThreadMessage,
   Call,
   CallSignal,
   Channel,
@@ -2712,4 +2713,162 @@ export async function forgetWhatsAppSession(
     [sessionId, userId]
   );
   return rows.length > 0;
+}
+
+/* ── talking to the bot from inside the app ─────────────────────────────────── */
+
+/**
+ * The phone behind a session, but only if this user is the one who paired it.
+ *
+ * Written as one query rather than "fetch then check", so a session id somebody guessed reads
+ * nothing at all instead of being read and then rejected. Null covers both "no such session"
+ * and "not yours", and the caller cannot tell the two apart — the same shape as
+ * getWhatsAppPairing.
+ *
+ * This is the only gate between a signed-in user and the bot: every write below goes through
+ * it, so a bug here would let one account drive another account's bot.
+ */
+async function botSessionPhone(userId: string, sessionId: string): Promise<string | null> {
+  const rows = await q<{ phone: string | null }>(
+    `select s.phone
+       from varnox_sessions s
+      where s.id = $1
+        and s.status is distinct from 'disconnected'
+        and exists (
+          select 1 from varnox_pairing_requests p
+           where p.user_id = $2
+             and 'web_' || p.phone = s.id
+             and p.status = 'connected'
+        )`,
+    [sessionId, userId]
+  );
+  return rows[0] ? rows[0].phone ?? '' : null;
+}
+
+type BotThreadRow = {
+  direction: 'in' | 'out';
+  id: number;
+  body: string | null;
+  kind: string;
+  state: string | null;
+  error: string | null;
+  media_id: number | null;
+  byte_size: number | null;
+  created_at: Date | string;
+};
+
+/**
+ * One picture the bot sent, if this account is allowed to see it.
+ *
+ * Permission is by reference, not by ownership: media is stored once per distinct image and
+ * shared between every thread that received it, so there is no user on the media row to check
+ * against. What is checked instead is that one of this account's own replies points at it —
+ * which also means identical bytes sent to two people reveal nothing to either, since they
+ * already had the same picture.
+ *
+ * Returns null rather than throwing for "not yours" and "does not exist" alike, so the route
+ * can answer both with the same 404 and no one learns which is which.
+ */
+export async function botMediaFor(
+  mediaId: number,
+  userId: string
+): Promise<{ mime: string; bytes: Buffer } | null> {
+  if (!Number.isFinite(mediaId)) return null;
+
+  const rows = await q<{ mime: string; bytes: Buffer }>(
+    `select m.mime, m.bytes
+       from varnox_bot_media m
+      where m.id = $1
+        and exists (
+          select 1 from varnox_bot_outbound o
+           where o.media_id = m.id and o.user_id = $2
+        )`,
+    [mediaId, userId]
+  );
+
+  return rows[0] ?? null;
+}
+
+/**
+ * Queue a message typed in the app for the bot to answer.
+ *
+ * Returns null when the session is not this user's, so the route can answer 404 without the
+ * caller learning whether the session exists at all.
+ *
+ * Nothing is sent here. The row is a request; the bot's bridge helper on the host picks it up
+ * and writes the answer to varnox_bot_outbound. That indirection is why the app never needs a
+ * route to the host, and why the host never needs a route into the app.
+ */
+export async function sendBotMessage(
+  userId: string,
+  sessionId: string,
+  body: string
+): Promise<{ id: number; at: number } | null> {
+  if (!sessionId || !body) return null;
+
+  const phone = await botSessionPhone(userId, sessionId);
+  if (phone === null) return null;
+
+  const rows = await q<{ id: number; created_at: Date | string }>(
+    `insert into varnox_bot_inbound (session_id, user_id, body)
+     values ($1, $2, $3)
+     returning id, created_at`,
+    [sessionId, userId, body]
+  );
+
+  return rows[0] ? { id: rows[0].id, at: toEpochMs(rows[0].created_at) } : null;
+}
+
+/**
+ * The thread for one number: what was typed, and what came back, in one list.
+ *
+ * Scoped by user_id in both halves of the union, so a session id belonging to somebody else
+ * yields an empty thread rather than theirs.
+ *
+ * Bounded to the newest `limit` rows before sorting, not after — taking the newest *combined*
+ * rows is what keeps a long thread's page meaningful. Ordering is by created_at because the two
+ * tables have independent id sequences, and both are written by the same database clock.
+ */
+export async function listBotThread(
+  userId: string,
+  sessionId: string,
+  limit = 100
+): Promise<BotThreadMessage[]> {
+  if (!sessionId) return [];
+
+  const size = Math.min(Math.max(Number(limit) || 100, 1), 500);
+
+  // The media join is a LEFT JOIN rather than a subquery so the byte size comes back with the
+  // row: the screen can then skip fetching a picture it is not going to render, and never has
+  // to ask the media route whether it exists.
+  const rows = await q<BotThreadRow>(
+    `with recent as (
+       select 'in' as direction, i.id, i.body, 'text' as kind,
+              i.status as state, i.error, null::bigint as media_id,
+              null::integer as byte_size, i.created_at
+         from varnox_bot_inbound i
+        where i.session_id = $1 and i.user_id = $2
+       union all
+       select 'out', o.id, o.body, o.kind, null, null, o.media_id, m.byte_size, o.created_at
+         from varnox_bot_outbound o
+         left join varnox_bot_media m on m.id = o.media_id
+        where o.session_id = $1 and o.user_id = $2
+       order by created_at desc, id desc
+       limit $3
+     )
+     select * from recent order by created_at asc, id asc`,
+    [sessionId, userId, size]
+  );
+
+  return rows.map((r) => ({
+    direction: r.direction,
+    id: Number(r.id),
+    body: r.body ?? '',
+    kind: r.kind,
+    state: (r.state as BotThreadMessage['state']) ?? null,
+    error: r.error,
+    mediaId: r.media_id === null ? null : Number(r.media_id),
+    mediaBytes: r.byte_size === null ? null : Number(r.byte_size),
+    at: toEpochMs(r.created_at),
+  }));
 }

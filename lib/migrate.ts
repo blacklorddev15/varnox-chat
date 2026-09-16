@@ -296,6 +296,69 @@ const STEPS: Step[] = [
             updated_at timestamptz not null default now()
           )`,
   },
+  {
+    kind: 'table',
+    label: 'varnox_bot_inbound',
+    sql: `create table if not exists varnox_bot_inbound (
+            id         bigserial primary key,
+            session_id text not null,
+            user_id    text not null,
+            body       text not null,
+            status     text not null default 'pending',
+            error      text,
+            created_at timestamptz not null default now(),
+            claimed_at timestamptz,
+            acted_at   timestamptz
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'varnox_bot_inbound_claim',
+    sql: `create index if not exists varnox_bot_inbound_claim
+            on varnox_bot_inbound (status, created_at)`,
+  },
+  {
+    kind: 'index',
+    label: 'varnox_bot_inbound_thread',
+    sql: `create index if not exists varnox_bot_inbound_thread
+            on varnox_bot_inbound (session_id, id desc)`,
+  },
+  {
+    kind: 'table',
+    label: 'varnox_bot_outbound',
+    sql: `create table if not exists varnox_bot_outbound (
+            id         bigserial primary key,
+            session_id text not null,
+            user_id    text not null,
+            inbound_id bigint,
+            kind       text not null default 'text',
+            body       text,
+            created_at timestamptz not null default now()
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'varnox_bot_outbound_thread',
+    sql: `create index if not exists varnox_bot_outbound_thread
+            on varnox_bot_outbound (session_id, id)`,
+  },
+  {
+    kind: 'table',
+    label: 'varnox_bot_media',
+    sql: `create table if not exists varnox_bot_media (
+            id         bigserial primary key,
+            sha256     text not null unique,
+            mime       text not null,
+            bytes      bytea not null,
+            byte_size  integer not null,
+            created_at timestamptz not null default now()
+          )`,
+  },
+  {
+    kind: 'column',
+    label: 'varnox_bot_outbound.media_id',
+    sql: `alter table varnox_bot_outbound add column if not exists media_id bigint`,
+  },
 ];
 
 /** A request waits this long for reconciliation, then carries on without it. */

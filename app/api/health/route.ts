@@ -28,6 +28,11 @@ const REQUIRED_TABLES = [
   // polls them by name and the names come from its source rather than from here.
   'varnox_pairing_requests',
   'varnox_sessions',
+  // The command bridge's tables, for the same reason: the bot's helper names them, and a
+  // missing one here would fail silently — the app would queue messages into a table nobody
+  // reads and the thread would simply never answer.
+  'varnox_bot_inbound',
+  'varnox_bot_outbound',
 ];
 const REQUIRED_COLUMNS: { table: string; column: string }[] = [
   { table: 'vx_users', column: 'email' },
