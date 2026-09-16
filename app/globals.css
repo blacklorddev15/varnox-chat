@@ -2360,3 +2360,251 @@ html[data-theme='dark'] .switch-line button {
     color: #6ee0bc;
   }
 }
+
+/* ── channels (broadcast) ─────────────────────────────────────────────── */
+
+/* The channels screen borrows the updates shell — .updates, .updates-head, .updates-body — and
+   the chat list's own row classes, because both are the same thing: a head, a scrolling list,
+   and rows of avatar plus two lines. Only what a channel adds is named here. */
+
+/* Discovery sits at the top of the list, with the "new channel" button beside it. */
+.ch-top {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+.ch-top .settings-row {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A round icon button that is not sitting in a coloured header, so it reads on the light
+   panel. (The chat header's buttons inherit their colour from the header instead.) */
+.ch-round {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  margin-right: 10px;
+  border-radius: 50%;
+  color: var(--brand-strong);
+  transition: background 0.15s;
+}
+.ch-round:hover {
+  background: var(--hover);
+}
+.ch-round:disabled {
+  opacity: 0.45;
+}
+html[data-theme='dark'] .ch-round {
+  color: #6ee0bc;
+}
+
+/* The tile that stands where a channel has no picture yet — the same size as the avatar it
+   replaces, so a row does not change height when one is added. */
+.ch-ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 49px;
+  height: 49px;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+}
+html[data-theme='dark'] .ch-ic {
+  color: #6ee0bc;
+}
+
+/* The bold unread dot. Presence rather than a count: a broadcast is not addressed to you, so
+   "3 new" would be a number with nothing to act on behind it. */
+.ch-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+html[data-theme='dark'] .ch-dot {
+  background: #6ee0bc;
+}
+
+/* The follow button in the discover sheet: small enough to sit in a row beside a name. */
+.ch-follow {
+  flex: none;
+  padding: 7px 14px;
+  font-size: 13.4px;
+}
+
+/* The open channel takes the whole screen, exactly as the status viewer does. */
+.channel-view {
+  position: fixed;
+  inset: 0;
+  margin: 0 auto;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+}
+@media (min-width: 1000px) {
+  .channel-view {
+    max-width: 620px;
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+.channel-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  height: var(--header-h);
+  padding: 0 8px;
+  background: var(--header);
+  color: var(--header-text);
+}
+.channel-head .avatar {
+  flex: none;
+}
+/* The name and the follower count. A button for the owner, because tapping it names the
+   followers; a plain span for everyone else, who may not see them. */
+.channel-head .who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+.channel-head .who b {
+  font-weight: 500;
+  font-size: 16.4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.channel-head .who span {
+  color: var(--header-muted);
+  font-size: 12.6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.channel-head .menu {
+  top: 52px;
+  right: 8px;
+}
+
+.channel-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 12px 16px;
+}
+
+/* What the channel is about, once, above its posts. */
+.ch-about {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 13.2px;
+  line-height: 1.5;
+}
+
+/* A post is plain and full width. No tail, no ticks, no per-recipient status and no reply —
+   there is one author and no one to address. */
+.ch-post {
+  align-self: stretch;
+  padding: 9px 12px 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+html[data-theme='light'] .ch-post {
+  background: var(--panel);
+}
+.ch-post .text {
+  margin: 0;
+  font-size: 14.8px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ch-post img {
+  display: block;
+  width: 100%;
+  margin-bottom: 7px;
+  border-radius: 6px;
+}
+.ch-post .meta {
+  margin-top: 3px;
+  text-align: right;
+  color: var(--muted);
+  font-size: 11.6px;
+}
+
+/* The owner's composer. Only the owner ever sees this box — for everyone else the note below
+   stands in its place. */
+.ch-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex: none;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--line);
+  background: var(--panel-2);
+}
+.ch-composer textarea {
+  flex: 1;
+  min-width: 0;
+  max-height: 120px;
+  padding: 10px 14px;
+  border-radius: 20px;
+  border: 1px solid transparent;
+  outline: none;
+  resize: none;
+  background: var(--panel-3);
+  font-size: 14.6px;
+}
+.ch-composer textarea:focus {
+  border-color: var(--brand);
+}
+.ch-composer .ch-round {
+  margin: 0 0 1px;
+  background: var(--panel-3);
+}
+.ch-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+}
+.ch-send:disabled {
+  opacity: 0.45;
+}
+
+/* What a follower gets instead of a composer: a statement of fact rather than a disabled box
+   that would look like a broken input. */
+.ch-note {
+  flex: none;
+  margin: 0;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}

@@ -110,7 +110,7 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
   const [filter, setFilter] = useState<'all' | 'unread' | 'groups'>('all');
   const [forwardIds, setForwardIds] = useState<string[]>([]);
   /** Which bottom tab the phone layout is on. Wide screens ignore it and show chats. */
-  const [tab, setTab] = useState<'chats' | 'updates'>('chats');
+  const [tab, setTab] = useState<'chats' | 'updates' | 'channels'>('chats');
 
   const lastAtRef = useRef(0);
   const selectedRef = useRef<string | null>(null);

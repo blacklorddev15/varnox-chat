@@ -334,8 +334,13 @@ create table if not exists vx_link_codes (
 -- schedule — the filter is what makes it short-lived, and a row survives only as history.
 --
 -- `kind` is 'text' or 'image'. A text update stores no media and carries `bg` (one of the
--- composer's dark swatches) so it still renders as a coloured card; a photo update stores
--- `media_url` and may carry a caption in `text`.
+-- composer's dark swatches) so it still renders as a coloured card, while a photo update
+-- stores `media_url` and may carry a caption in `text`.
+--
+-- Keep semicolons out of these notes. db/schema.sql is split on `;` by scripts/db-apply.mjs,
+-- and a stray one inside a comment cuts the statement in half. The splitter now strips line
+-- comments first, but a comment that cannot break the file is better than one that merely
+-- survives it.
 create table if not exists vx_status (
   id         text primary key,
   user_id    text not null,
@@ -362,3 +367,59 @@ create table if not exists vx_status_views (
   viewed_at bigint not null,
   primary key (status_id, viewer_id)
 );
+
+/* ── channels (broadcast) ─────────────────────────────────────────────── */
+
+-- A one-to-many broadcast: one owner, many followers, and only the owner writes to it.
+-- `avatar` is an upload URL like any other, and `description` is the line shown under the
+-- name wherever a channel is offered for following.
+create table if not exists vx_channels (
+  id          text primary key,
+  owner_id    text not null,
+  name        text not null,
+  description text,
+  avatar      text,
+  created_at  bigint not null
+);
+
+-- The sidebar asks for "the channels I own" often enough to be worth an index of its own.
+create index if not exists vx_channels_owner on vx_channels (owner_id);
+
+/* ── who follows a channel ────────────────────────────────────────────── */
+
+-- One row per follower, and the owner is a follower of their own channel from the moment it
+-- is created — that keeps every read (the follower count, "channels I follow") to one rule
+-- instead of an owner-shaped special case everywhere.
+--
+-- `last_read_at` is this user's high-water mark, the same idea as vx_reads for conversations:
+-- the unread count of a channel is the number of posts newer than it, derived on read rather
+-- than stored, so it cannot drift away from the posts it describes.
+create table if not exists vx_channel_follows (
+  channel_id   text not null,
+  user_id      text not null,
+  followed_at  bigint not null,
+  last_read_at bigint not null default 0,
+  primary key (channel_id, user_id)
+);
+
+-- The list of channels one user follows is a lookup by user, not by channel.
+create index if not exists vx_channel_follows_user on vx_channel_follows (user_id);
+
+/* ── channel posts ────────────────────────────────────────────────────── */
+
+-- A post takes a `channel_id` on its own table rather than reusing vx_messages: a message
+-- carries conversation semantics — replyTo, view-once, per-recipient delivery status, an
+-- author who is one of two equals — none of which describes a broadcast. `kind` is 'text'
+-- or 'image'. An image post stores `media_url` and may carry a caption in `text`.
+create table if not exists vx_channel_posts (
+  id         text primary key,
+  channel_id text not null,
+  author_id  text not null,
+  kind       text not null,
+  text       text,
+  media_url  text,
+  created_at bigint not null
+);
+
+-- Every read of a channel is "its latest posts", so the index carries the ordering too.
+create index if not exists vx_channel_posts_channel on vx_channel_posts (channel_id, created_at desc);
