@@ -76,7 +76,14 @@ function beep() {
   }
 }
 
-export function Messenger({ me: initialMe }: { me: PublicUser }) {
+export function Messenger({
+  me: initialMe,
+  isAdmin = false,
+}: {
+  me: PublicUser;
+  /** Server-decided. Only controls whether the Settings row is drawn; it is not a permission. */
+  isAdmin?: boolean;
+}) {
   const router = useRouter();
   const [me, setMe] = useState<PublicUser>(initialMe);
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
@@ -980,6 +987,7 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
       {panel === 'settings' ? (
         <SettingsScreen
           me={me}
+          isAdmin={isAdmin}
           settings={settings}
           onClose={() => setPanel(null)}
           onSave={saveSettings}

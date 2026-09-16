@@ -3224,3 +3224,80 @@ html[data-theme='dark'] .bubble.tail-out {
   background: var(--brand-soft);
   border: 1px solid color-mix(in srgb, var(--brand) 34%, transparent);
 }
+
+/* ── the owner's control page ───────────────────────────────────────────────── */
+
+/* Only ever rendered for an account on the allowlist that has also entered the admin password.
+   The gate is on the server; this is only the layout. */
+.admin-wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 28px 18px 64px;
+}
+.admin-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.admin-title {
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 600;
+  font-style: italic;
+  color: var(--gold-bright);
+}
+.admin-section {
+  margin-top: 26px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.admin-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.admin-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+}
+.admin-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.admin-row-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+}
+.admin-name {
+  font-size: 14px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.admin-handle {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.admin-meta {
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.admin-why {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.admin-note {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--brand);
+}

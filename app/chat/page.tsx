@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { currentUser, publicUser } from '@/lib/auth';
+import { currentUser, isAdmin, publicUser } from '@/lib/auth';
 import { getSuspension } from '@/lib/db';
 import { ensureSchema } from '@/lib/migrate';
 import { Messenger } from '@/components/messenger';
@@ -34,5 +34,8 @@ export default async function ChatPage() {
   const suspension = await getSuspension(me.id);
   if (suspension) return <SuspendedScreen suspension={suspension} />;
 
-  return <Messenger me={publicUser(me)} />;
+  // Decided here, from the same allowlist the admin routes use, so the row in Settings and the
+  // routes behind it cannot disagree. This only decides whether to draw a link — every route
+  // checks again for itself, and the page checks before it reads anything.
+  return <Messenger me={publicUser(me)} isAdmin={isAdmin(me)} />;
 }

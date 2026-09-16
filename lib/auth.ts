@@ -170,7 +170,123 @@ export function isAdmin(user: User | null): boolean {
 export async function requireAdmin(): Promise<User> {
   const user = await requireUser();
   if (!isAdmin(user)) throw new ForbiddenError();
+  // The allowlist says which account may be an admin. The password is a second, independent
+  // check for the person holding that account — a phone left unlocked in a pocket should not be
+  // enough to delete somebody's account. Both must pass.
+  if (!(await adminUnlocked())) throw new ForbiddenError();
   return user;
+}
+
+/* ── the admin password ────────────────────────────────────────────────────── */
+
+/**
+ * The admin password's scrypt hash, from the environment.
+ *
+ * A hash in an env var rather than a literal in the code, and this is the security decision in
+ * the whole feature. A literal would live in a public repository — readable by anyone — and it
+ * would grant suspend and delete over every account on the platform. A value in a browser bundle
+ * would be worse still: not even a repository needed. An env var is only reachable by somebody
+ * who can already redeploy the app, and a hash means reading it does not hand over the password.
+ *
+ * Generate it with the same function that hashes account passwords, so the format cannot drift:
+ *   node -e "console.log(require('crypto').scryptSync(process.argv[1], require('crypto').randomBytes(16).toString('hex'), 64).toString('hex'))" 'your password'
+ * then wrap it as scrypt$salt$hash — or simply reuse hashPassword() from a script.
+ */
+export function adminPasswordHash(): string {
+  return (process.env.ADMIN_PASSWORD_HASH || '').trim();
+}
+
+/**
+ * Whether a password is required on top of the allowlist.
+ *
+ * Unset means the allowlist is the only gate, which is already a real boundary — that is how the
+ * admin routes shipped. Leaving it unset must not lock the owner out of their own routes, and
+ * must not silently mean "no password required, so allow": the allowlist still applies.
+ */
+export function adminPasswordRequired(): boolean {
+  return adminPasswordHash().length > 0;
+}
+
+/**
+ * Check a password against the stored hash.
+ *
+ * Returns false when no hash is configured rather than true. An empty password must never be a
+ * way through: if this returned true whenever the variable was missing, clearing the variable
+ * would be a way to skip the check.
+ */
+export function checkAdminPassword(password: string): boolean {
+  const stored = adminPasswordHash();
+  if (!stored) return false;
+  return verifyPassword(password, stored);
+}
+
+/**
+ * How long an unlocked admin session lasts.
+ *
+ * Short on purpose. The point of the password is that the account being signed in is not by
+ * itself enough, so the proof should expire while the person is still nearby — not last as long
+ * as the session cookie does.
+ */
+const ADMIN_UNLOCK_MS = 30 * 60_000;
+
+export const ADMIN_COOKIE = 'vx_admin';
+
+/**
+ * Proof that the admin password was entered, as a signed cookie.
+ *
+ * Purpose-bound rather than a session: `verifySession` requires a uid and this payload has none,
+ * so an unlock token can never be accepted as a signed-in session. And `verifyAdminUnlock`
+ * requires the purpose below, so a session token can never be accepted as an unlock. The two are
+ * not interchangeable in either direction, which is the property that matters.
+ */
+export function signAdminUnlock(): string {
+  const body = b64u(
+    Buffer.from(JSON.stringify({ purpose: 'admin', exp: Date.now() + ADMIN_UNLOCK_MS }))
+  );
+  const sig = b64u(crypto.createHmac('sha256', SECRET).update(body).digest());
+  return `${body}.${sig}`;
+}
+
+export function verifyAdminUnlock(token: string | undefined | null): boolean {
+  if (!token || !token.includes('.')) return false;
+  const [body, sig] = token.split('.');
+  if (!body || !sig) return false;
+  const expected = b64u(crypto.createHmac('sha256', SECRET).update(body).digest());
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString()) as {
+      purpose?: string;
+      exp?: number;
+    };
+    return payload.purpose === 'admin' && typeof payload.exp === 'number' && payload.exp > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+/** True when the admin gate is satisfied: no password configured, or an unexpired unlock. */
+export async function adminUnlocked(): Promise<boolean> {
+  if (!adminPasswordRequired()) return true;
+  const jar = await cookies();
+  return verifyAdminUnlock(jar.get(ADMIN_COOKIE)?.value);
+}
+
+export async function setAdminUnlockCookie() {
+  const jar = await cookies();
+  jar.set(ADMIN_COOKIE, signAdminUnlock(), {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: Math.floor(ADMIN_UNLOCK_MS / 1000),
+  });
+}
+
+export async function clearAdminUnlockCookie() {
+  const jar = await cookies();
+  jar.set(ADMIN_COOKIE, '', { httpOnly: true, path: '/', maxAge: 0 });
 }
 
 export class ForbiddenError extends Error {

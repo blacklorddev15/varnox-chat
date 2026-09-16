@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import type {
   PrivacyWho,
   PublicUser,
@@ -35,6 +36,7 @@ const STATUS_WHO: { id: StatusPrivacyWho; label: string }[] = [
 
 export function SettingsScreen({
   me,
+  isAdmin,
   settings,
   onClose,
   onSave,
@@ -46,6 +48,8 @@ export function SettingsScreen({
   onToast,
 }: {
   me: PublicUser;
+  /** Whether the viewer may open the owner's controls. Decided on the server, never here. */
+  isAdmin: boolean;
   settings: UserSettings;
   onClose: () => void;
   onSave: (patch: Record<string, unknown>) => Promise<UserSettings | null>;
@@ -462,6 +466,29 @@ export function SettingsScreen({
             </button>
             <p className="hint" style={{ padding: '0 22px' }}>
               Your browser asks for permission the first time you switch this on.
+            </p>
+          </div>
+        ) : null}
+
+        {/**
+         * Last on the page on purpose. It shows only for an account on the allowlist, and being
+         * at the end keeps it out of the way of the settings people actually change — as well as
+         * out of the way of anyone looking over a shoulder for a way in.
+         */}
+        {isAdmin ? (
+          <div className="settings-group">
+            <div className="label">Owner</div>
+            <Link href="/admin" className="settings-row">
+              <span className="ic">
+                <IconLock />
+              </span>
+              <span className="txt">
+                Admin control
+                <small>Accounts, reports, blocked numbers.</small>
+              </span>
+            </Link>
+            <p className="hint" style={{ padding: '0 22px' }}>
+              Asks for the admin password before anything can be changed.
             </p>
           </div>
         ) : null}
