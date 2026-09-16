@@ -1,6 +1,6 @@
 import { requireAdmin } from '@/lib/auth';
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
-import { getSuspension, suspendAccount } from '@/lib/db';
+import { getSuspension, getUser, recordAdminAction, suspendAccount } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +30,18 @@ export async function POST(req: Request, ctx: Ctx) {
 
     const done = await suspendAccount(id, reason);
     if (!done) return bad('No such account, or it has been deleted', 404);
+
+    // Written after the write, never before. A row claiming an action that did not happen is
+    // worse than no row at all, because it is the record anybody would consult to find out what
+    // really happened — and it would be wrong in the one direction nobody thinks to doubt.
+    const target = await getUser(id);
+    await recordAdminAction({
+      actor: admin,
+      action: 'suspend',
+      targetId: id,
+      targetName: target ? target.displayName || target.username : id,
+      detail: reason,
+    });
 
     return ok({ suspension: await getSuspension(id) });
   });

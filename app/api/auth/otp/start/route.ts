@@ -35,6 +35,16 @@ export async function POST(req: Request) {
     const phone = normalisePhone(clean(body.phone, 24));
     if (!phone) return bad('Enter a valid phone number, including the country code');
 
+    /**
+     * No blocklist check here, and that is deliberate.
+     *
+     * A blocked number gets no code and the same reply as anybody else — but deciding that at
+     * this level means returning before the throttles, and then the two answers differ in the
+     * one way that is easy to see: a real number answers 429 on a second request inside the
+     * cooldown, while a blocked number would answer 200 every time. That is a way to ask whether
+     * a number is blocked. The decision therefore lives in `startOtp`, after the rate slots have
+     * been spent, so the two paths are indistinguishable by construction.
+     */
     const result = await startOtp(phone, clientIp(req));
     if (!result.ok) return bad(result.error, result.status);
 

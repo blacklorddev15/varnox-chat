@@ -10,6 +10,7 @@ import {
   createDevice,
   emailTaken,
   getUserByUsername,
+  isPhoneBlocked,
   phoneTaken,
   reservePhone,
   reserveUsername,
@@ -42,6 +43,19 @@ export async function POST(req: Request) {
     if (rawPhone && !phone) {
       return bad('Enter a valid phone number including country code, e.g. +65 9123 4567');
     }
+    /**
+     * Refused plainly here, unlike at /api/auth/otp/start, and the difference is intentional.
+     *
+     * That endpoint is a probe — anyone can call it for any number — so it must not say whether
+     * a number is blocked. This one is somebody asserting an identity and creating state, and a
+     * vague error would only send them round the same form again. Checked before the
+     * already-registered test so a blocked number cannot be used to work out whether it is also
+     * registered.
+     */
+    if (phone && (await isPhoneBlocked(phone))) {
+      return bad('This phone number cannot be used to create an account', 403);
+    }
+
     if (phone && (await phoneTaken(phone))) {
       return bad('That phone number is already registered', 409);
     }

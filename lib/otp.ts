@@ -16,7 +16,15 @@
  */
 
 import crypto from 'node:crypto';
-import { claimOtpAttempt, clearOtp, consumeOtp, getOtp, putOtp, takeRateSlot } from './db';
+import {
+  claimOtpAttempt,
+  clearOtp,
+  consumeOtp,
+  getOtp,
+  isPhoneBlocked,
+  putOtp,
+  takeRateSlot,
+} from './db';
 import { formatPhone, phoneKey } from './phone';
 import { sendLoginCode } from './sms';
 
@@ -132,6 +140,29 @@ export async function startOtp(phone: string, ip: string | null): Promise<StartO
     };
   }
 
+  /**
+   * A blocked number stops here — after the throttles, deliberately not before them.
+   *
+   * The order is the whole point. Returning early, as this first did, skips all three rate slots,
+   * and the answer a blocked number gets then differs from a real one in the one dimension that
+   * is trivial to observe: a real number answers 429 on a second request inside the cooldown,
+   * while a blocked number would have answered 200 every time, forever. That difference is a way
+   * to ask whether a number is blocked — the exact thing the identical body above is meant to
+   * prevent. So the slots are spent first, and only then is the answer decided.
+   *
+   * Nothing is written and nothing is sent: the caller is told a code is on its way and none is.
+   * The declared TTL and cooldown are returned rather than values read back, because there is no
+   * code row to read them from — and they are what a real send would have said.
+   */
+  if (await isPhoneBlocked(phone)) {
+    return {
+      ok: true,
+      to: formatPhone(phone),
+      expiresInSec: Math.round(OTP_TTL_MS / 1000),
+      resendInSec: Math.round(OTP_RESEND_MS / 1000),
+    };
+  }
+
   const code = generateCode();
   await putOtp({
     phone,
@@ -168,6 +199,23 @@ export type VerifyOtpResult =
 /** Check a code. On success it is consumed, so the same code cannot be used twice. */
 export async function verifyOtp(phone: string, code: string): Promise<VerifyOtpResult> {
   const now = Date.now();
+
+  /**
+   * A blocked number cannot finish signing in, and the answer says nothing about why.
+   *
+   * This belongs here and not only at the send step. A code is good for ten minutes, so a number
+   * blocked a moment after a code was sent could otherwise still trade that code for a session —
+   * and, if it had no account yet, for a brand new one. Blocking a number because of the abuse
+   * that accompanies it asking for codes is the ordinary case, which makes a code already in
+   * flight the ordinary situation rather than a corner of one.
+   *
+   * The reply is exactly the one an absent code produces, so this cannot be used to ask whether
+   * a number is blocked, and nothing is consumed or cleared on the way through.
+   */
+  if (await isPhoneBlocked(phone)) {
+    return { ok: false, status: 400, error: 'Request a new code.', reissue: true };
+  }
+
   const row = await getOtp(phone);
 
   if (!row) {

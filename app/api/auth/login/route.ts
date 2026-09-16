@@ -6,6 +6,7 @@ import {
   getUserByPhone,
   getUserByUsername,
   isAccountDeleted,
+  isPhoneBlocked,
   saveUser,
 } from '@/lib/db';
 import { normaliseEmail } from '@/lib/email';
@@ -32,6 +33,19 @@ export async function POST(req: Request) {
     // actually be that kind of identifier, so a handle containing "@" is not mistaken for
     // an address and a mistyped number still falls through to the username check.
     const phone = normalisePhone(raw);
+
+    /**
+     * A blocked number is answered exactly like a wrong password, which is the same treatment a
+     * deleted account gets further down.
+     *
+     * This field accepts a number as one of three possible identifiers, so a distinct answer
+     * would let anyone walk a list of numbers and learn which are blocked. Checked before any
+     * lookup, so a blocked number costs the same either way.
+     */
+    if (phone && (await isPhoneBlocked(phone))) {
+      return bad('Incorrect phone number, email or password', 401);
+    }
+
     const email = normaliseEmail(raw);
     const user =
       (phone ? await getUserByPhone(phone) : null) ??

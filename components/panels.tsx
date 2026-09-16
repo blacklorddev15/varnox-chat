@@ -537,6 +537,110 @@ const TIMERS: { sec: number; label: string }[] = [
   { sec: 7_776_000, label: '90 days' },
 ];
 
+/**
+ * The reasons offered, matching the list the API accepts. Fixed rather than free text so the
+ * owner's queue can be counted and skimmed, with "Something else" covering whatever the list
+ * forgot. The wording is what a person would say, not internal categories — somebody picks from
+ * this while annoyed.
+ */
+const REPORT_REASONS: [string, string][] = [
+  ['spam', 'Spam or unwanted messages'],
+  ['scam', 'Scam or fraud'],
+  ['harassment', 'Harassment or threats'],
+  ['impersonation', 'Pretending to be someone else'],
+  ['inappropriate', 'Inappropriate content'],
+  ['other', 'Something else'],
+];
+
+/**
+ * Report this contact or group.
+ *
+ * Inline inside the info panel rather than in a sheet of its own: the panel is already a sheet,
+ * and stacking one on another makes the backdrop ambiguous — a click on it would have to mean
+ * one of two different things, and the wrong guess closes the form somebody was filling in.
+ *
+ * Nothing is sent until a reason is chosen. The api refuses a report with no reason anyway, and
+ * a button that only sometimes works is worse than one that is visibly disabled.
+ *
+ * The confirmation replaces the form instead of appearing beneath it, so nobody has to wonder
+ * whether it went.
+ */
+function ReportBlock({ kind, targetId }: { kind: 'user' | 'group'; targetId: string }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const [note, setNote] = useState('');
+  const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'failed'>('idle');
+
+  async function send() {
+    if (!reason) return;
+    setState('sending');
+    try {
+      // The server works out the name of what is being reported and ignores anything the client
+      // might claim about it, so nothing here is sent for display on the other end.
+      await post('/api/reports', { kind, targetId, reason, note: note.trim() });
+      setState('sent');
+    } catch {
+      setState('failed');
+    }
+  }
+
+  if (state === 'sent') {
+    return (
+      <p className="hint" style={{ flexBasis: '100%', margin: 0 }}>
+        Sent for review. Thank you — a person reads these.
+      </p>
+    );
+  }
+
+  if (!open) {
+    return (
+      <button type="button" className="btn ghost" onClick={() => setOpen(true)}>
+        Report
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ flexBasis: '100%' }}>
+      <div className="list-label">Why are you reporting this?</div>
+      {REPORT_REASONS.map(([value, label]) => (
+        <button key={value} type="button" className="pick-row" onClick={() => setReason(value)}>
+          <span className={`check${reason === value ? ' on' : ''}`}>
+            {reason === value ? <IconCheck size={13} /> : null}
+          </span>
+          <span className="body">{label}</span>
+        </button>
+      ))}
+
+      <textarea
+        value={note}
+        maxLength={500}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Anything to add? (optional)"
+        style={{ width: '100%', marginTop: 10, minHeight: 68 }}
+      />
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        <button
+          type="button"
+          className="btn"
+          disabled={!reason || state === 'sending'}
+          onClick={send}
+        >
+          {state === 'sending' ? 'Sending…' : 'Send report'}
+        </button>
+        <button type="button" className="btn ghost" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+
+      {state === 'failed' ? (
+        <p className="error">Could not send that. Try again in a moment.</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function ChatInfoPanel({
   me,
   chat,
@@ -797,6 +901,11 @@ export function ChatInfoPanel({
           >
             {blocked ? 'Unblock contact' : 'Block contact'}
           </button>
+        ) : null}
+        {isGroup ? (
+          <ReportBlock kind="group" targetId={chat.id} />
+        ) : chat.peer ? (
+          <ReportBlock kind="user" targetId={chat.peer.id} />
         ) : null}
         <button type="button" className="btn danger" onClick={() => onLeave(chat.id)}>
           {isGroup ? 'Leave group' : 'Delete chat'}

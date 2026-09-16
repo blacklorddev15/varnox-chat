@@ -202,6 +202,13 @@ when opening the pool — you can paste Neon's string in verbatim.
 | `POST` | `/api/admin/accounts/[id]/suspend` | *(owner)* Suspend an account, with an optional `reason` |
 | `POST` | `/api/admin/accounts/[id]/reinstate` | *(owner)* Lift a suspension |
 | `POST` | `/api/admin/accounts/[id]/delete` | *(owner)* Delete somebody else's account (soft; confirmed by typing their handle) |
+| `POST` | `/api/reports` | Report a user, a group or one message |
+| `GET` | `/api/admin/reports` | *(owner)* The report queue; `?only=all` includes closed ones |
+| `POST` | `/api/admin/reports/[id]/close` | *(owner)* Mark a report as dealt with |
+| `GET` | `/api/admin/blocked` | *(owner)* Numbers barred from signing up or in |
+| `POST` | `/api/admin/blocked` | *(owner)* Block a number |
+| `POST` | `/api/admin/blocked/remove` | *(owner)* Lift a block |
+| `GET` | `/api/admin/audit` | *(owner)* Who did what, newest first |
 
 ## Suspending and deleting accounts
 
@@ -226,6 +233,58 @@ handle is an invitation to impersonate somebody who has just left.
 Owner powers need `ADMIN_USERNAMES` set to your handle, otherwise every `/api/admin/*` route
 answers 403. There is no admin screen in the app; these routes are called directly, and the
 requester's identity is always re-read from the session rather than taken from the request.
+
+### Something to act on
+
+**Reports** are how a decision gets asked for by somebody who is not the accused. Anyone can
+report a user, a group or a single message from the report action in a chat's info panel. The
+name shown in the queue is resolved from the database, never taken from the request — the queue
+is text an owner acts on, so anything a reporter could type into it would be a way to put a
+different person's name in front of the owner. Reporting the same target twice does not file two
+reports, one account's open reports are capped so the queue cannot be flooded, and a closed
+report can be filed again because a second offence is a new event.
+
+Closing a report records **what was decided, not what was done** — the suspension is a separate
+action with its own audit entry. A closed report with no suspension beside it therefore means the
+report was read and nothing was warranted, which is a real outcome worth being able to see.
+
+### Repeat offenders
+
+Suspension is per-account, so it costs one new SIM to walk around. `vx_blocked_phones` is the part
+that does not: a blocked number gets no login code, cannot register, and cannot sign in with a
+password. Numbers are stored as `phoneKey()` writes them, so a block catches the same number typed
+with or without a plus.
+
+The replies differ by endpoint on purpose. `/api/auth/otp/start` takes any number from anyone, so
+it answers exactly as it would for a real send and merely sends nothing — a distinct answer would
+turn it into a way to ask whether a number is blocked. `/api/auth/login` answers like a wrong
+password, the same treatment a deleted account gets. `/api/auth/register` refuses plainly, because
+somebody creating an account is asserting an identity and a vague error would only send them round
+the same form again.
+
+Two details make the quiet answer actually quiet, and both are easy to get wrong:
+
+- **The block is decided inside `startOtp`, after the rate slots are spent — not in the route.**
+  Returning early from the route skips the throttles, and the two answers then differ in the one
+  way that is trivial to observe: a real number answers 429 on a second request inside the
+  cooldown, while a blocked number would answer 200 every time. That difference is itself a way
+  to ask whether a number is blocked.
+- **`verifyOtp` checks the list too.** A code is good for ten minutes, so blocking a number a
+  moment after a code was sent would otherwise leave that code exchangeable for a session — and,
+  for a number with no account yet, for a brand new one. It answers exactly as an absent code
+  does, so nothing is revealed either way.
+
+**A block does not end existing sessions.** It stops a number obtaining a *new* one. Ending the
+sessions an account already holds is what suspension is for, and the two are meant to be used
+together: suspend the account to stop it being used, block the number to stop it coming back.
+
+### Knowing who did what
+
+Every owner action writes a row to `vx_admin_audit` — suspend, reinstate, delete, block, unblock,
+close-report — naming the actor, the target and the reason. It is written **after** the action
+succeeds, never before: a record claiming something happened that did not is worse than no record,
+because it is the thing anybody would consult to find out what really happened. There is no route
+to edit or delete an entry.
 
 ## Known limits
 

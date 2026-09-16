@@ -4,6 +4,7 @@ import {
   emailTaken,
   getSuspension,
   getUserByPhone,
+  isPhoneBlocked,
   releasePhone,
   reservePhone,
   saveUser,
@@ -50,6 +51,12 @@ export async function PATCH(req: Request) {
       const phone = normalisePhone(raw);
       if (!phone) return bad('Enter a valid phone number including country code');
       if (phone !== me.phone) {
+        // A fourth place a phone number can be written, and the one the blocklist first missed.
+        // Without this a blocked number is still claimable — by the account being blocked, or by
+        // anybody else who wants a number that is meant to be out of circulation.
+        if (await isPhoneBlocked(phone)) {
+          return bad('That phone number cannot be used', 403);
+        }
         const holder = await getUserByPhone(phone);
         if (holder && holder.id !== me.id) {
           return bad('That phone number is already registered', 409);

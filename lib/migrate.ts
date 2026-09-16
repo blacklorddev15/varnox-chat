@@ -429,6 +429,62 @@ export const STEPS: Step[] = [
     sql: `alter table vx_users add column if not exists review_requested_at bigint`,
   },
   {
+    kind: 'table',
+    label: 'vx_admin_audit',
+    sql: `create table if not exists vx_admin_audit (
+            id          bigserial primary key,
+            actor_id    text   not null,
+            actor_name  text   not null,
+            action      text   not null,
+            target_id   text   not null,
+            target_name text   not null,
+            detail      text,
+            at          bigint not null
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_admin_audit_at',
+    sql: `create index if not exists vx_admin_audit_at on vx_admin_audit (at desc)`,
+  },
+  {
+    kind: 'table',
+    label: 'vx_blocked_phones',
+    sql: `create table if not exists vx_blocked_phones (
+            phone      text primary key,
+            reason     text,
+            blocked_by text   not null,
+            at         bigint not null
+          )`,
+  },
+  {
+    kind: 'table',
+    label: 'vx_reports',
+    sql: `create table if not exists vx_reports (
+            id          bigserial primary key,
+            reporter_id text   not null,
+            kind        text   not null,
+            target_id   text   not null,
+            target_name text   not null,
+            reason      text   not null,
+            note        text,
+            status      text   not null default 'open',
+            handled_by  text,
+            handled_at  bigint,
+            at          bigint not null
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_reports_queue',
+    sql: `create index if not exists vx_reports_queue on vx_reports (status, at desc)`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_reports_reporter',
+    sql: `create index if not exists vx_reports_reporter on vx_reports (reporter_id, target_id, status)`,
+  },
+  {
     kind: 'index',
     label: 'vx_sms_outbox_phone',
     sql: `create index if not exists vx_sms_outbox_phone

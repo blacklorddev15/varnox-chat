@@ -1,6 +1,6 @@
 import { requireAdmin } from '@/lib/auth';
 import { bad, handle, ok } from '@/lib/api';
-import { reinstateAccount } from '@/lib/db';
+import { getUser, recordAdminAction, reinstateAccount } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,13 +16,24 @@ type Ctx = { params: Promise<{ id: string }> };
  */
 export async function POST(_req: Request, ctx: Ctx) {
   return handle(async () => {
-    await requireAdmin();
+    const admin = await requireAdmin();
     const { id } = await ctx.params;
 
     const done = await reinstateAccount(id);
     // A 409 rather than a silent success: an admin who reinstates an account that was not
     // suspended has done nothing, and should be told so rather than shown a confirmation.
     if (!done) return bad('That account is not suspended', 409);
+
+    // Lifting a suspension is a decision too, and a log that only records punishments reads as a
+    // list of accusations with no acquittals.
+    const target = await getUser(id);
+    await recordAdminAction({
+      actor: admin,
+      action: 'reinstate',
+      targetId: id,
+      targetName: target ? target.displayName || target.username : id,
+      detail: null,
+    });
 
     return ok({ suspension: null });
   });
