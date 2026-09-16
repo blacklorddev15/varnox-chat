@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { cookies } from 'next/headers';
 import type { SessionPayload, User, PublicUser } from './types';
-import { getUser, isDeviceActive } from './db';
+import { getUser, isAccountDeleted, isDeviceActive } from './db';
 
 const COOKIE = 'varnox_session';
 const SECRET = process.env.SESSION_SECRET || 'varnox-local-dev-secret';
@@ -96,7 +96,13 @@ export async function currentUser(): Promise<User | null> {
   const payload = verifySession(jar.get(COOKIE)?.value);
   if (!payload) return null;
   if (payload.did && !(await isDeviceActive(payload.did))) return null;
-  return getUser(payload.uid);
+  const user = await getUser(payload.uid);
+  if (!user) return null;
+  // A deleted account is signed out of everything at once, and this is the one place that makes
+  // it so: every authenticated route reaches the database through requireUser, which reaches
+  // this. Checking here means deletion cannot be half-applied by a route that forgot to look.
+  if (await isAccountDeleted(user.id)) return null;
+  return user;
 }
 
 export function publicUser(u: User): PublicUser {

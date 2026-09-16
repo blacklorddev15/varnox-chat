@@ -8,20 +8,10 @@ import type {
   UserSettings,
   WallpaperId,
 } from '@/lib/types';
+import { post } from '@/lib/client';
 import { formatPhone } from '@/lib/phone';
 import { Avatar } from './avatar';
-import {
-  IconBack,
-  IconBell,
-  IconBlock,
-  IconChat,
-  IconLink,
-  IconLock,
-  IconPalette,
-  IconStar,
-  IconUser,
-  IconWhatsApp,
-} from './icons';
+import { IconBack, IconBell, IconBlock, IconChat, IconLink, IconLock, IconPalette, IconStar, IconTrash, IconUser, IconWhatsApp } from './icons';
 
 const WALLS: { id: WallpaperId; label: string }[] = [
   { id: 'doodle', label: 'Doodle' },
@@ -68,6 +58,28 @@ export function SettingsScreen({
 }) {
   const [section, setSection] = useState<'root' | 'privacy' | 'wallpaper' | 'notifications'>('root');
   const [busy, setBusy] = useState(false);
+  /* Deleting is confirmed by typing the handle, and the prompt is inline rather than a section
+     of its own: it is one irreversible action, not a place to browse. */
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [delTyped, setDelTyped] = useState('');
+  const [delBusy, setDelBusy] = useState(false);
+  const [delError, setDelError] = useState('');
+
+  async function deleteMine() {
+    if (delBusy) return;
+    setDelBusy(true);
+    setDelError('');
+    try {
+      await post('/api/account/delete', { username: delTyped.trim() });
+      // The session cookie is gone and the account with it. Leaving the app is the only honest
+      // place to end up, and the parent already knows how to do that.
+      onSignOut();
+    } catch (err) {
+      setDelError(err instanceof Error ? err.message : 'Could not delete the account');
+    } finally {
+      setDelBusy(false);
+    }
+  }
 
   async function askNotifications(next: boolean) {
     if (!next) {
@@ -253,6 +265,60 @@ export function SettingsScreen({
                   </small>
                 </span>
               </div>
+              {/* Above Sign out, and styled the same warning colour: both leave, this one
+                  does not come back. */}
+              <button
+                type="button"
+                className="settings-row warn"
+                onClick={() => setConfirmDelete((prev) => !prev)}
+              >
+                <span className="ic">
+                  <IconTrash />
+                </span>
+                <span className="txt">
+                  Delete account
+                  <small>Removes the account for good. This cannot be undone.</small>
+                </span>
+              </button>
+
+              {confirmDelete ? (
+                <div className="danger-confirm">
+                  <p className="hint">
+                    This cannot be undone. Your messages stay with the people you sent them to.
+                    Type your username to confirm.
+                  </p>
+                  <input
+                    value={delTyped}
+                    onChange={(e) => setDelTyped(e.target.value)}
+                    placeholder="your username"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                  />
+                  {delError ? <p className="hint error">{delError}</p> : null}
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      className="btn danger"
+                      disabled={delBusy || !delTyped.trim()}
+                      onClick={() => void deleteMine()}
+                    >
+                      {delBusy ? 'Deleting…' : 'Delete my account'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn ghost"
+                      onClick={() => {
+                        setConfirmDelete(false);
+                        setDelTyped('');
+                        setDelError('');
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
               <button type="button" className="settings-row warn" onClick={onSignOut}>
                 <span className="ic">
                   <IconUser />

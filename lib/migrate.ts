@@ -406,6 +406,11 @@ export const STEPS: Step[] = [
           )`,
   },
   {
+    kind: 'column',
+    label: 'vx_users.deleted_at',
+    sql: `alter table vx_users add column if not exists deleted_at bigint`,
+  },
+  {
     kind: 'index',
     label: 'vx_sms_outbox_phone',
     sql: `create index if not exists vx_sms_outbox_phone

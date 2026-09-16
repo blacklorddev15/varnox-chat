@@ -710,3 +710,19 @@ create table if not exists vx_sms_outbox (
 -- Read by number and recency, which is the only way it is ever queried.
 create index if not exists vx_sms_outbox_phone on vx_sms_outbox (to_phone, created_at desc);
 
+/* ── deleting an account ───────────────────────────────────────────────── */
+
+-- When an account was deleted, or null while it is alive.
+--
+-- Soft rather than a real delete, because the alternative destroys other people's data: a user's
+-- messages sit in threads that belong to everybody who was in them, and removing the rows would
+-- reach into conversations this person was only half of. A deleted account stops being able to
+-- sign in, stops appearing in search, and keeps its messages where they already are.
+--
+-- A timestamp rather than a boolean, so "when" is answerable later without another migration.
+--
+-- Keep the semicolon character out of these notes. This file is split on it before the
+-- statements reach Postgres, and one typed inside a comment cuts a statement in half.
+alter table vx_users
+  add column if not exists deleted_at bigint;
+
