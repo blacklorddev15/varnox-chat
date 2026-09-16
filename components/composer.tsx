@@ -99,7 +99,10 @@ export function Composer({
       };
       recorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        // Strip ";codecs=…" from what the recorder reports — the upload endpoint matches on
+        // the bare media type, and "audio/webm;codecs=opus" is not "audio/webm".
+        const recorded = (recorder.mimeType || 'audio/webm').split(';')[0].trim() || 'audio/webm';
+        const blob = new Blob(chunksRef.current, { type: recorded });
         const sec = Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000));
         if (blob.size > 0) onSend({ text: '', audio: { blob, sec } });
       };
