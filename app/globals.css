@@ -3087,3 +3087,39 @@ html[data-theme='dark'] .chat-bg-pattern {
 html[data-theme='dark'] .bubble.tail-out {
   border: 1px solid var(--line);
 }
+
+/* Showing a code that could not be texted. Styled as a quiet aside rather than a second
+   call to action: it is an alternative to reading a message, not the main path. */
+.dev-sms {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.dev-sms-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.dev-sms-code {
+  font-size: 26px;
+  letter-spacing: 6px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.dev-sms-body {
+  font-size: 13px;
+  color: var(--muted);
+  word-break: break-word;
+}
+.dev-sms-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.dev-sms-link {
+  display: block;
+  margin: 14px auto 0;
+  font-size: 13px;
+  color: var(--brand);
+}

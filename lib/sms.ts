@@ -15,11 +15,13 @@
 
 type Provider = 'console' | 'twilio' | 'vonage' | 'messagebird' | 'generic';
 
+import { q } from './pg';
+
 export type SmsResult = { ok: boolean; provider: Provider; error?: string };
 
 const PROVIDERS: Provider[] = ['console', 'twilio', 'vonage', 'messagebird', 'generic'];
 
-function devMode(): boolean {
+export function devMode(): boolean {
   return process.env.SMS_DEV_MODE === '1';
 }
 
@@ -59,6 +61,38 @@ async function fetchJson(
  * route must not report success for an SMS that never left. On failure it returns
  * `ok: false` with a message safe to show a user.
  */
+/**
+ * Record a message so it can be read instead of texted.
+ *
+ * Reached from exactly one place — the dev-mode branch — so "written only in dev mode" and
+ * "readable only in dev mode" are the same condition and cannot drift apart. The body carries
+ * a live login code and vx_otp stores only code_hash, so recording anywhere that actually sends
+ * would put plaintext codes into the database and undo the thing that design exists for. The
+ * console provider deliberately does not record either: it is selectable in production, and a
+ * second write path leaves the invariant holding only by convention.
+ *
+ * It cannot throw. Failing to write a diagnostic row must never be what stops somebody joining.
+ */
+async function recordOutbox(
+  phone: string,
+  body: string,
+  provider: Provider,
+  result: SmsResult
+): Promise<void> {
+  try {
+    await q(
+      `insert into vx_sms_outbox (to_phone, body, provider, ok, error, created_at)
+       values ($1, $2, $3, $4, $5, $6)`,
+      [phone, body, provider, result.ok, result.error ?? null, Date.now()]
+    );
+  } catch (err) {
+    console.error(
+      '[varnox] could not record the SMS dev row',
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
 export async function sendLoginCode(
   phone: string,
   code: string,
@@ -71,7 +105,9 @@ export async function sendLoginCode(
   // while sending nothing.
   if (devMode()) {
     console.log(`[varnox] SMS dev mode — code for ${phone}: ${code}`);
-    return { ok: true, provider: 'console' };
+    const result: SmsResult = { ok: true, provider: 'console' };
+    await recordOutbox(phone, text, 'console', result);
+    return result;
   }
 
   const which = configured();

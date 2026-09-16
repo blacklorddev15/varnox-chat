@@ -680,3 +680,33 @@ create table if not exists varnox_bot_media (
 -- Points an answer at the picture it carried. Null for a plain text reply.
 alter table varnox_bot_outbound
   add column if not exists media_id bigint;
+
+/* ── the code made when there is no SMS to send it with ────────────────── */
+
+-- What a login code was written as, for when there is no provider to text it.
+--
+-- Only ever written in SMS dev mode — where by definition nothing was sent. That condition is
+-- the safety argument: the body carries a live login code, and vx_otp deliberately stores only
+-- code_hash, so recording in a mode that actually sends would put plaintext codes into the
+-- database and undo what that design is for. Written only in dev mode, read only in dev mode.
+--
+-- Reading it back is guarded in the query, not in the route: a code is only ever handed to a
+-- number that has no account yet, so reading one here can create an account but never enter
+-- somebody else's. Handing one back for an existing number would mean anybody who knows a
+-- phone number could sign in as its owner, because the code step is also how you sign in.
+--
+-- Keep the semicolon character out of these notes. This file is split on it before the
+-- statements reach Postgres, and one typed inside a comment cuts a statement in half.
+create table if not exists vx_sms_outbox (
+  id         bigserial primary key,
+  to_phone   text    not null,
+  body       text    not null,
+  provider   text    not null,
+  ok         boolean not null default true,
+  error      text,
+  created_at bigint  not null
+);
+
+-- Read by number and recency, which is the only way it is ever queried.
+create index if not exists vx_sms_outbox_phone on vx_sms_outbox (to_phone, created_at desc);
+
