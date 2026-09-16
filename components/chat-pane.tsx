@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatRow, Message, PublicUser, WallpaperId } from '@/lib/types';
 import { dayLabel, presence, timeOfDay } from '@/lib/format';
+import { post } from '@/lib/client';
 import { Avatar } from './avatar';
 import { Composer, type Outgoing } from './composer';
 import { VoiceNote } from './voice';
@@ -66,6 +67,7 @@ export function ChatPane({
   messages,
   reads,
   reactions,
+  views,
   typing,
   disappearSec,
   hasMore,
@@ -97,6 +99,7 @@ export function ChatPane({
   messages: Message[];
   reads: Record<string, number>;
   reactions: Record<string, Record<string, string>>;
+  views: Record<string, string[]>;
   typing: string[];
   disappearSec: number;
   hasMore: boolean;
@@ -128,6 +131,9 @@ export function ChatPane({
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [onceOpened, setOnceOpened] = useState<Record<string, string>>({});
+  const [onceNote, setOnceNote] = useState<Record<string, string>>({});
+  const [onceBusy, setOnceBusy] = useState('');
   const [infoFor, setInfoFor] = useState<Message | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ, setSearchQ] = useState('');
@@ -141,6 +147,8 @@ export function ChatPane({
     setEditing(null);
     setSearchOpen(false);
     setSearchQ('');
+    setOnceOpened({});
+    setOnceNote({});
   }, [chat?.id]);
 
   const shown = useMemo(() => {
@@ -148,6 +156,35 @@ export function ChatPane({
     const q = searchQ.trim().toLowerCase();
     return messages.filter((m) => m.text.toLowerCase().includes(q));
   }, [messages, searchOpen, searchQ]);
+
+  /* View-once attachments are only ever fetched through /open, which hands back a short-lived
+     tokenised URL and marks the message spent. The stored mediaUrl is never used as a src. */
+  async function openOnce(msg: Message) {
+    if (onceBusy) return;
+    setOnceBusy(msg.id);
+    try {
+      const res = await post<{ url: string; mime: string | null; type: string; expiresInSec: number }>(
+        `/api/messages/${msg.id}/open`
+      );
+      setOnceOpened((prev) => ({ ...prev, [msg.id]: res.url }));
+      setOnceNote((prev) => {
+        const next = { ...prev };
+        delete next[msg.id];
+        return next;
+      });
+      if (msg.type === 'image') setLightbox(res.url);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '';
+      setOnceNote((prev) => ({
+        ...prev,
+        [msg.id]: /already been opened/i.test(message)
+          ? 'Already opened'
+          : msg.text || 'Could not open that attachment',
+      }));
+    } finally {
+      setOnceBusy('');
+    }
+  }
 
   if (!chat) {
     return (
@@ -285,6 +322,19 @@ export function ChatPane({
           const msgReactions = reactions[msg.id] ?? {};
           const reactionEntries = Object.entries(msgReactions);
           const selected = selection.includes(msg.id);
+          const onceViewers = views[msg.id] ?? [];
+          const onceUrl = onceOpened[msg.id] ?? '';
+          const onceByMe = onceViewers.includes(me.id) || Boolean(onceUrl);
+          const onceByOthers = onceViewers.some((id) => id !== me.id);
+          const onceLabel =
+            msg.type === 'audio' ? 'Voice message · view once' : 'Photo · view once';
+          const onceState = onceByMe
+            ? 'Opened'
+            : outgoing
+              ? onceByOthers
+                ? 'Opened'
+                : 'Sent · view once'
+              : (onceNote[msg.id] ?? '');
 
           return (
             <div key={msg.id}>
@@ -345,7 +395,7 @@ export function ChatPane({
                     </button>
                   ) : null}
 
-                  {msg.type === 'image' && msg.mediaUrl ? (
+                  {msg.type === 'image' && msg.mediaUrl && !msg.once ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       className="media"
@@ -359,8 +409,57 @@ export function ChatPane({
                     />
                   ) : null}
 
-                  {msg.type === 'audio' && msg.mediaUrl ? (
+                  {msg.type === 'audio' && msg.mediaUrl && !msg.once ? (
                     <VoiceNote src={msg.mediaUrl} sec={msg.audioSec ?? 0} />
+                  ) : null}
+
+                  {msg.once && msg.type === 'audio' && onceUrl ? (
+                    <VoiceNote src={onceUrl} sec={msg.audioSec ?? 0} />
+                  ) : null}
+
+                  {msg.once && (msg.type === 'image' || msg.type === 'audio') ? (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        minWidth: 200,
+                        maxWidth: '100%',
+                        padding: '6px 6px 4px',
+                        cursor: outgoing || onceByMe ? 'default' : 'pointer',
+                        opacity: onceByMe ? 0.75 : 1,
+                      }}
+                      onClick={(e) => {
+                        if (selecting || outgoing || onceByMe) return;
+                        e.stopPropagation();
+                        openOnce(msg);
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: '50%',
+                          border: '1.5px solid currentColor',
+                          display: 'grid',
+                          placeItems: 'center',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          lineHeight: 1,
+                          flex: '0 0 auto',
+                        }}
+                      >
+                        1
+                      </span>
+                      <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                        <b style={{ fontSize: 13.4 }}>{onceLabel}</b>
+                        {onceState ? (
+                          <span className="hint" style={{ fontSize: 12.6, lineHeight: 1.35 }}>
+                            {onceState}
+                          </span>
+                        ) : null}
+                      </span>
+                    </div>
                   ) : null}
 
                   {msg.type === 'file' && msg.mediaUrl ? (

@@ -19,6 +19,7 @@ export type Outgoing = {
   image?: File | null;
   audio?: { blob: Blob; sec: number } | null;
   file?: File | null;
+  once?: boolean;
 };
 
 export function Composer({
@@ -44,6 +45,7 @@ export function Composer({
   const [preview, setPreview] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordSec, setRecordSec] = useState(0);
+  const [viewOnce, setViewOnce] = useState(false);
   const [error, setError] = useState('');
 
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -79,11 +81,12 @@ export function Composer({
     const body = text.trim();
     if (sending) return;
     if (!body && !image && !file) return;
-    onSend({ text: body, image, file });
+    onSend({ text: body, image, file, once: viewOnce });
     setText('');
     setImage(null);
     setFile(null);
     setEmoji(false);
+    setViewOnce(false);
   }
 
   /* ------------------------------------------------------------- voice */
@@ -104,7 +107,10 @@ export function Composer({
         const recorded = (recorder.mimeType || 'audio/webm').split(';')[0].trim() || 'audio/webm';
         const blob = new Blob(chunksRef.current, { type: recorded });
         const sec = Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000));
-        if (blob.size > 0) onSend({ text: '', audio: { blob, sec } });
+        if (blob.size > 0) {
+          onSend({ text: '', audio: { blob, sec }, once: viewOnce });
+          setViewOnce(false);
+        }
       };
       recorderRef.current = recorder;
       startedAtRef.current = Date.now();
@@ -160,6 +166,24 @@ export function Composer({
       </div>
     );
   }
+
+  const onceBadge = (
+    <span
+      style={{
+        width: 20,
+        height: 20,
+        borderRadius: '50%',
+        border: '1.5px solid currentColor',
+        display: 'grid',
+        placeItems: 'center',
+        fontSize: 12,
+        fontWeight: 700,
+        lineHeight: 1,
+      }}
+    >
+      1
+    </span>
+  );
 
   return (
     <>
@@ -264,6 +288,15 @@ export function Composer({
             </div>
           ) : null}
         </div>
+
+        <button
+          type="button"
+          className={`icon-btn${viewOnce ? ' on' : ''}`}
+          title="View once"
+          onClick={() => setViewOnce((v) => !v)}
+        >
+          {onceBadge}
+        </button>
 
         <input
           ref={imageRef}

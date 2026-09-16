@@ -245,14 +245,15 @@ export function MediaGallery({ convId }: { convId: string }) {
 
   useEffect(() => {
     let alive = true;
-    api<{ messages: { type: string; mediaUrl?: string; at: number }[] }>(
+    api<{ messages: { type: string; mediaUrl?: string; at: number; once?: boolean }[] }>(
       `/api/chats/${convId}/messages?limit=120`
     )
       .then((res) => {
         if (!alive) return;
         setItems(
           res.messages
-            .filter((m) => m.type === 'image' && m.mediaUrl)
+            // View-once photos are left out: their bytes are never served from mediaUrl.
+            .filter((m) => m.type === 'image' && m.mediaUrl && !m.once)
             .map((m) => ({ url: m.mediaUrl as string, at: m.at }))
             .slice(-24)
             .reverse()

@@ -3,6 +3,7 @@ import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
 import {
   getConv,
   getConvReads,
+  getMessageViews,
   getMessages,
   getReactions,
   getSettings,
@@ -47,12 +48,18 @@ export async function GET(req: Request, ctx: Ctx) {
       getTyping(id),
     ]);
 
+    // Who has opened which view-once message. Returned alongside the messages rather than
+    // inside them, the same shape as reads and reactions: the sender needs to see "Opened",
+    // and the recipient needs to know a message is already spent.
+    const views = await getMessageViews(result.messages.map((m) => m.id));
+
     return ok({
       messages: result.messages,
       cursor: result.cursor ?? null,
       hasMore: result.hasMore,
       reads,
       reactions,
+      views,
       typing: typing.filter((uid) => uid !== me.id),
       disappearSec: conv.disappearSec ?? 0,
       serverAt: Date.now(),
@@ -70,6 +77,7 @@ type SendBody = {
   fileName?: string;
   fileSize?: number;
   mime?: string;
+  once?: boolean;
   replyTo?: { id: string; text: string; senderName: string } | null;
 };
 
@@ -127,6 +135,9 @@ export async function POST(req: Request, ctx: Ctx) {
       msg.fileSize = Math.max(0, Math.round(Number(body.fileSize) || 0));
       msg.mime = clean(body.mime, 120) || 'application/octet-stream';
     }
+    // View-once applies to a photo or a voice note; a text message has nothing to hide.
+    if (body.once && (type === 'image' || type === 'audio')) msg.once = true;
+
     if (body.replyTo?.id) {
       msg.replyTo = {
         id: clean(body.replyTo.id, 60),

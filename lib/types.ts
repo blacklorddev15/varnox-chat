@@ -84,6 +84,11 @@ export type Message = {
   fileSize?: number;
   mime?: string;
   forwarded?: boolean;
+  /**
+   * View-once: the recipient can open the attachment a single time. The flag is enforced by
+   * the media route refusing to serve the bytes without a token, not by the UI alone.
+   */
+  once?: boolean;
   replyTo?: { id: string; text: string; senderName: string } | null;
 };
 

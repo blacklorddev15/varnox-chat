@@ -431,6 +431,7 @@ type MessageRow = {
   file_size: number | null;
   mime: string | null;
   forwarded: boolean;
+  once: boolean;
   reply_to: Message['replyTo'];
 };
 
@@ -457,6 +458,7 @@ function toMessage(r: MessageRow): Message {
   if (r.file_size != null) msg.fileSize = Number(r.file_size);
   if (r.mime != null) msg.mime = r.mime;
   if (r.forwarded) msg.forwarded = true;
+  if (r.once) msg.once = true;
   if (r.reply_to != null) msg.replyTo = r.reply_to;
   return msg;
 }
@@ -465,8 +467,8 @@ export async function saveMessage(msg: Message): Promise<void> {
   await q(
     `insert into vx_messages
        (id, conv_id, sender_id, sender_name, at, type, text, media_url, media_w, media_h,
-        audio_sec, file_name, file_size, mime, forwarded, reply_to)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        audio_sec, file_name, file_size, mime, forwarded, reply_to, once)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
      on conflict (id) do update set
        text = excluded.text,
        media_url = excluded.media_url,
@@ -477,7 +479,8 @@ export async function saveMessage(msg: Message): Promise<void> {
        file_size = excluded.file_size,
        mime = excluded.mime,
        forwarded = excluded.forwarded,
-       reply_to = excluded.reply_to`,
+       reply_to = excluded.reply_to,
+       once = excluded.once`,
     [
       msg.id,
       msg.convId,
@@ -495,9 +498,51 @@ export async function saveMessage(msg: Message): Promise<void> {
       msg.mime ?? null,
       Boolean(msg.forwarded),
       msg.replyTo ? JSON.stringify(msg.replyTo) : null,
+      Boolean(msg.once),
     ]
   );
   invalidate(`m:${msg.convId}`);
+}
+
+/** One message by id, for the view-once path. Not cached: it is read once per open. */
+export async function getMessage(id: string): Promise<Message | null> {
+  if (!id) return null;
+  const rows = await q<MessageRow>('select * from vx_messages where id = $1', [id]);
+  return rows[0] ? toMessage(rows[0]) : null;
+}
+
+/**
+ * Claim the single view of a message for this user.
+ *
+ * The primary key on (message_id, user_id) does the work: a second attempt conflicts and
+ * inserts nothing, so exactly one caller can ever be told it succeeded. A read-then-write
+ * would let two concurrent opens both believe they were first.
+ */
+export async function claimMessageView(messageId: string, userId: string): Promise<boolean> {
+  const rows = await q(
+    `insert into vx_msg_views (message_id, user_id, viewed_at)
+     values ($1, $2, $3)
+     on conflict (message_id, user_id) do nothing
+     returning message_id`,
+    [messageId, userId, Date.now()]
+  );
+  return rows.length > 0;
+}
+
+/** Which of these messages each user has already opened, keyed by message id. */
+export async function getMessageViews(
+  messageIds: string[]
+): Promise<Record<string, string[]>> {
+  if (!messageIds.length) return {};
+  const rows = await q<{ message_id: string; user_id: string }>(
+    'select message_id, user_id from vx_msg_views where message_id = any($1::text[])',
+    [messageIds]
+  );
+  const map: Record<string, string[]> = {};
+  for (const r of rows) {
+    (map[r.message_id] ??= []).push(r.user_id);
+  }
+  return map;
 }
 
 type OpRow = { msg_id: string; conv_id: string; op: string; text: string | null; at: number };
