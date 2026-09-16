@@ -1,6 +1,7 @@
 import { newId } from './ids';
 import {
   getConv,
+  getUser,
   lastMessage,
   listMarkers,
   putMarker,
@@ -146,6 +147,54 @@ export async function deliverMessage(me: User, conv: Conv, msg: Message): Promis
     )
   );
   return msg;
+}
+
+/**
+ * Display names for a set of user ids, for use in a system line.
+ *
+ * An id that no longer resolves becomes "someone" rather than being dropped. An event claiming
+ * two people were removed when three were is worse than one with an imprecise name in it.
+ */
+export async function namesFor(userIds: string[]): Promise<string[]> {
+  const users = await Promise.all(userIds.map((id) => getUser(id)));
+  return userIds.map((_id, i) => users[i]?.displayName?.trim() || 'someone');
+}
+
+/**
+ * A readable list of names.
+ *
+ * Capped, because adding 250 people in one go would otherwise write a line nobody can read —
+ * past a handful, the count is the part that matters.
+ */
+export function describeMembers(names: string[], limit = 5): string {
+  const live = names.filter(Boolean);
+  if (!live.length) return 'someone';
+  if (live.length <= limit) return live.join(', ');
+  return `${live.slice(0, limit).join(', ')} and ${live.length - limit} more`;
+}
+
+/**
+ * Record something that happened to a group — someone was added, removed, joined or left — as
+ * a system message in the thread.
+ *
+ * This goes through deliverMessage rather than writing the message directly, and that is the
+ * whole point. A message written on its own would appear in the thread but not in anybody's
+ * sidebar preview, so the change would stay silent in the chat list — which is the one place
+ * people notice it, because nobody is sitting in the group when it happens.
+ *
+ * `conv` must be the conversation as it stands AFTER the change. That is what makes the event
+ * reach somebody who has just been added, and stay away from somebody who has just been removed.
+ */
+export async function recordGroupEvent(me: User, conv: Conv, text: string): Promise<Message> {
+  return deliverMessage(me, conv, {
+    id: newId('m'),
+    convId: conv.id,
+    senderId: me.id,
+    senderName: me.displayName,
+    at: Date.now(),
+    type: 'system',
+    text,
+  });
 }
 
 /** Copy a message into another conversation (forward). */
