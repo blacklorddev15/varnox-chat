@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { currentUser } from '@/lib/auth';
 import { getConv, getInvite, getSuspension } from '@/lib/db';
+import { ensureSchema } from '@/lib/migrate';
 import { refreshConv } from '@/lib/service';
 import { SuspendedScreen } from '@/components/suspended-screen';
 
@@ -10,6 +11,11 @@ export const dynamic = 'force-dynamic';
 /** Invite links land here: sign in if needed, join the group, then open the app. */
 export default async function JoinPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
+
+  // Same reason as /chat: this page reads a suspension column and is not an API route, so nothing
+  // else would have reconciled the schema on a cold instance whose first request is this one.
+  await ensureSchema();
+
   const me = await currentUser();
   if (!me) redirect(`/login?next=${encodeURIComponent(`/join/${code}`)}`);
 
