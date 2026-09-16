@@ -145,6 +145,48 @@ function disappearLabel(sec: number): string {
   return `${sec}s`;
 }
 
+/**
+ * Anything that looks like a link: a scheme, a "www." host, or a bare "name.tld" domain with
+ * an optional path. The pattern is deliberately loose — it decides what looks like a link,
+ * not what resolves — and it never swallows the punctuation that follows one. The outer
+ * group is what makes split() hand the matches back.
+ */
+const URL_RE =
+  /((?:https?:\/\/|www\.)[^\s<]*[^\s<.,;:!?)\]}"']|[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?:[/?#][^\s<]*[^\s<.,;:!?)\]}"'])?)/gi;
+
+/** A link only starts at a word boundary, and never at the domain of an email address. */
+function linkStartsWord(before: string): boolean {
+  return !before || !/[\w@]/.test(before);
+}
+
+/** A link typed without a scheme is assumed to be https. */
+function linkHref(url: string): string {
+  return /^https?:\/\//i.test(url) ? url : `https://${url}`;
+}
+
+/**
+ * Message text with its links made clickable. One regex, split() to keep every other piece
+ * exactly as it was written, and a map over the parts: no dependency, no innerHTML, and
+ * React escapes the text the same way it always did. Multi-line messages are unaffected —
+ * the whitespace and the class names around this stay where they were.
+ */
+function Linkified({ text }: { text: string }) {
+  const parts = text.split(URL_RE);
+  return (
+    <>
+      {parts.map((part, i) => {
+        // The one capturing group puts the matches at the odd indexes.
+        if (i % 2 === 0 || !linkStartsWord(parts[i - 1].slice(-1))) return part;
+        return (
+          <a key={i} href={linkHref(part)} target="_blank" rel="noopener noreferrer">
+            {part}
+          </a>
+        );
+      })}
+    </>
+  );
+}
+
 export function ChatPane({
   me,
   chat,
@@ -478,7 +520,15 @@ export function ChatPane({
                       }}
                     >
                       <b>{msg.replyTo.senderName}</b>
-                      <span>{msg.replyTo.text || 'Attachment'}</span>
+                      <span>
+                        {/*
+                          Deliberately plain text. This quote sits inside a <button> that jumps
+                          to the quoted message, and an <a> inside a button is invalid markup
+                          whose clicks would also fire the jump. Links are still clickable in
+                          the bubble body, which is where they belong.
+                        */}
+                        {msg.replyTo.text || 'Attachment'}
+                      </span>
                     </button>
                   ) : null}
 
@@ -598,7 +648,9 @@ export function ChatPane({
                       </div>
                     </div>
                   ) : msg.text ? (
-                    <div className="text">{msg.text}</div>
+                    <div className="text">
+                      <Linkified text={msg.text} />
+                    </div>
                   ) : null}
 
                   <div className="meta">
