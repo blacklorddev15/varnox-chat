@@ -24,6 +24,7 @@ type MessagesResponse = {
   hasMore: boolean;
   reads: Record<string, number>;
   reactions: Record<string, Record<string, string>>;
+  views: Record<string, string[]>;
   typing: string[];
   disappearSec: number;
   serverAt: number;
@@ -70,6 +71,7 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [reads, setReads] = useState<Record<string, number>>({});
   const [reactions, setReactions] = useState<Record<string, Record<string, string>>>({});
+  const [views, setViews] = useState<Record<string, string[]>>({});
   const [typing, setTyping] = useState<string[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
@@ -252,6 +254,7 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
         setHasMore(res.hasMore);
         setReads(res.reads);
         setReactions(res.reactions);
+        setViews(res.views);
         setDisappearSec(res.disappearSec);
         lastAtRef.current = res.messages.length ? res.messages[res.messages.length - 1].at : 0;
       } catch (err) {
@@ -273,6 +276,7 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
       const res = await api<MessagesResponse>(`/api/chats/${chatId}/messages?since=${since}`);
       setReads(res.reads);
       setReactions(res.reactions);
+      setViews(res.views);
       setTyping(res.typing);
       setDisappearSec(res.disappearSec);
       if (res.messages.length) {
@@ -377,14 +381,32 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
       image?: File | null;
       audio?: { blob: Blob; sec: number } | null;
       file?: File | null;
+      location?: { lat: number; lng: number };
+      contact?: { name: string; phone: string };
+      once?: boolean;
     }) => {
       const chatId = selectedRef.current;
       if (!chatId || sending) return;
       setSending(true);
       try {
         let body: Record<string, unknown> = { type: 'text', text: payload.text, replyTo: reply };
-        if (payload.image) {
-          const up = await uploadMedia(payload.image, 'image');
+        // Location and contact carry a payload instead of a mediaUrl.
+        if (payload.location) {
+          body = {
+            type: 'location',
+            text: '',
+            payload: { lat: payload.location.lat, lng: payload.location.lng },
+            replyTo: reply,
+          };
+        } else if (payload.contact) {
+          body = {
+            type: 'contact',
+            text: '',
+            payload: { name: payload.contact.name, phone: payload.contact.phone },
+            replyTo: reply,
+          };
+        } else if (payload.image) {
+          const up = await uploadMedia(payload.image, 'image', Boolean(payload.once));
           body = {
             type: 'image',
             text: payload.text,
@@ -392,11 +414,13 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
             mediaW: up.width,
             mediaH: up.height,
             replyTo: reply,
+            ...(payload.once ? { once: true } : {}),
           };
         } else if (payload.audio) {
           const up = await uploadMedia(
             new File([payload.audio.blob], 'voice.webm', { type: payload.audio.blob.type || 'audio/webm' }),
-            'audio'
+            'audio',
+            Boolean(payload.once)
           );
           body = {
             type: 'audio',
@@ -405,6 +429,7 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
             audioSec: payload.audio.sec,
             mime: up.mime,
             replyTo: reply,
+            ...(payload.once ? { once: true } : {}),
           };
         } else if (payload.file) {
           const up = await uploadMedia(payload.file, 'auto');
@@ -718,6 +743,7 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
         messages={messages}
         reads={reads}
         reactions={reactions}
+        views={views}
         typing={typing}
         disappearSec={disappearSec}
         hasMore={hasMore}
@@ -735,6 +761,7 @@ export function Messenger({ me: initialMe }: { me: PublicUser }) {
         }}
         onToggleTheme={toggleTheme}
         onOpenInfo={() => setPanel('chat-info')}
+        onStartChat={startChatWith}
         onSend={send}
         onReact={react}
         onReply={setReply}

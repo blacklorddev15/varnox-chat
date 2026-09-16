@@ -36,6 +36,9 @@ export async function POST(req: Request) {
     if (file.size > MAX_BYTES) return bad('Files must be smaller than 4 MB');
 
     const kind = String(form.get('kind') ?? 'auto');
+    // View-once only means anything for something you look at or listen to. A one-shot PDF
+    // is not a thing anyone asks for, and allowing it would just be a footgun.
+    const once = String(form.get('once') ?? '') === '1';
 
     // A recording arrives as "audio/webm;codecs=opus" from Chrome and Android, or
     // "audio/mp4;codecs=…" from Safari, and sometimes with no type at all. Comparing that
@@ -78,7 +81,11 @@ export async function POST(req: Request) {
 
     // Stored in Postgres and served back through /api/media/<id>. The extension is kept
     // on the URL so a direct link or a download saves with a sensible name.
-    const stored = await saveMedia(buffer, mime);
+    if (once && category === 'docs') {
+      return bad('Only photos and voice notes can be sent as view once');
+    }
+
+    const stored = await saveMedia(buffer, mime, once);
     const url = `${stored.url}.${extensionFor(mime)}`;
 
     return ok(
@@ -88,6 +95,7 @@ export async function POST(req: Request) {
         mime,
         name: file.name || 'file',
         category,
+        once,
       },
       201
     );

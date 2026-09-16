@@ -80,10 +80,15 @@ export type UploadResult = {
   name: string;
   width: number;
   height: number;
+  once?: boolean;
 };
 
 /** Upload a photo, voice note or document. Photos are downscaled first. */
-export async function uploadMedia(file: File, kind: 'image' | 'audio' | 'auto'): Promise<UploadResult> {
+export async function uploadMedia(
+  file: File,
+  kind: 'image' | 'audio' | 'auto',
+  once = false
+): Promise<UploadResult> {
   let blob: Blob = file;
   let width = 0;
   let height = 0;
@@ -97,6 +102,7 @@ export async function uploadMedia(file: File, kind: 'image' | 'audio' | 'auto'):
 
   const form = new FormData();
   form.append('kind', kind);
+  if (once) form.append('once', '1');
   form.append('file', new File([blob], file.name || 'upload', { type: blob.type || file.type }));
 
   const res = await api<{ url: string; size: number; mime: string; name: string }>('/api/upload', {

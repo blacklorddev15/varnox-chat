@@ -55,6 +55,24 @@ const STATEMENTS: [label: string, sql: string][] = [
     'vx_otp_rate_window',
     `create index if not exists vx_otp_rate_window on vx_otp_rate (window_start)`,
   ],
+  ['vx_media.once', `alter table vx_media add column if not exists once boolean not null default false`],
+  [
+    'vx_messages.once',
+    `alter table vx_messages add column if not exists once boolean not null default false`,
+  ],
+  [
+    'vx_messages.payload',
+    `alter table vx_messages add column if not exists payload jsonb`,
+  ],
+  [
+    'vx_msg_views',
+    `create table if not exists vx_msg_views (
+       message_id text not null,
+       user_id    text not null,
+       viewed_at  bigint not null,
+       primary key (message_id, user_id)
+     )`,
+  ],
 ];
 
 /** Any value, as long as every instance of this app uses the same one. */

@@ -24,6 +24,12 @@ Live: https://varnox-chat.vercel.app
   way back into the account if the number is lost. It is **not** visible to anyone else: every
   projection of another member returns `null` for it, and the address is unverified until an email
   confirmation channel ships.
+- **View-once photos and voice notes** — flick the "1" toggle in the composer and the next photo
+  or recording can be opened by the recipient exactly once. The flag is enforced by the data, not
+  by the UI: media marked once is served only with a token minted by `POST /api/messages/<id>/open`,
+  which records the view first, so the URL in a chat payload is not a permanent link. The view is
+  claimed with a conditional insert, so two taps arriving together cannot both be first. What it
+  cannot do: stop a screenshot, or a screen photo. It prevents replay, not recording.
 - **Code sign-in is built for abuse, not just convenience** — codes are stored only as an HMAC
   (never in the clear), expire after 10 minutes, are single-use, and are thrown away after five
   wrong guesses. Sending is capped per number (3 per 15 minutes) and per IP (10 per hour) with a

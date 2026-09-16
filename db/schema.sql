@@ -262,3 +262,29 @@ alter table vx_users add column if not exists email text;
 create unique index if not exists vx_users_email_unique
   on vx_users (lower(email))
   where email is not null;
+
+/* ── view-once media ──────────────────────────────────────────────────── */
+
+-- A view-once photo or voice note is only view-once if the bytes cannot be fetched again.
+-- This flag is what makes /api/media/<id> refuse to serve the media without a token, so the
+-- URL in a chat payload is not enough on its own.
+alter table vx_media add column if not exists once boolean not null default false;
+
+-- The same flag on the message, so the UI knows to draw a placeholder instead of the media.
+alter table vx_messages add column if not exists once boolean not null default false;
+
+-- Who has opened what. The composite primary key *is* the enforcement: the second open
+-- attempts an insert that conflicts, so it is refused rather than counted twice.
+create table if not exists vx_msg_views (
+  message_id text not null,
+  user_id    text not null,
+  viewed_at  bigint not null,
+  primary key (message_id, user_id)
+);
+
+/* ── structured message payloads ──────────────────────────────────────── */
+
+-- A shared location or contact card has no media, so what it carries lives here:
+-- { lat, lng } (and an optional label) for 'location', { name, phone } for 'contact'.
+-- Every other message type leaves this null.
+alter table vx_messages add column if not exists payload jsonb;

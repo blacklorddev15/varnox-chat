@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ChatRow, Message, PublicUser, WallpaperId } from '@/lib/types';
+import type { ChatRow, Message, MessagePayload, PublicUser, WallpaperId } from '@/lib/types';
 import { dayLabel, presence, timeOfDay } from '@/lib/format';
+import { formatPhone } from '@/lib/phone';
+import { api, post } from '@/lib/client';
 import { Avatar } from './avatar';
 import { Composer, type Outgoing } from './composer';
 import { VoiceNote } from './voice';
@@ -53,6 +55,89 @@ function bytes(n?: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** A shared location pin: an OpenStreetMap embed, which needs no API key. */
+function LocationBubble({ payload }: { payload: MessagePayload }) {
+  const lat = Number(payload.lat);
+  const lng = Number(payload.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return (
+      <div className="map-card">
+        <span className="hint">Location unavailable</span>
+      </div>
+    );
+  }
+  // A small box around the point, so the map opens already centred on it.
+  const bbox = [lng - 0.005, lat - 0.004, lng + 0.005, lat + 0.004]
+    .map((n) => encodeURIComponent(String(n)))
+    .join(',');
+  const marker = `${encodeURIComponent(String(lat))},${encodeURIComponent(String(lng))}`;
+  return (
+    <div className="map-card">
+      <iframe
+        className="map-frame"
+        title="Shared location"
+        loading="lazy"
+        src={`https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${marker}`}
+      />
+      <span className="hint">
+        {lat.toFixed(5)}, {lng.toFixed(5)}
+      </span>
+      <a
+        className="map-open"
+        href={`https://www.openstreetmap.org/?mlat=${encodeURIComponent(String(lat))}&mlon=${encodeURIComponent(String(lng))}`}
+        target="_blank"
+        rel="noreferrer"
+      >
+        Open in Maps
+      </a>
+    </div>
+  );
+}
+
+/** A shared contact card. "Message" looks the number up and starts a direct chat if it exists. */
+function ContactBubble({
+  payload,
+  onStartChat,
+}: {
+  payload: MessagePayload;
+  onStartChat: (userId: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const name = payload.name ?? '';
+  const phone = payload.phone ?? '';
+
+  async function start() {
+    if (busy || !phone) return;
+    setBusy(true);
+    setNote('');
+    try {
+      const res = await api<{ users: PublicUser[] }>(`/api/users?q=${encodeURIComponent(phone)}`);
+      const match = res.users.find((u) => u.phone === phone) ?? res.users[0] ?? null;
+      if (match) onStartChat(match.id);
+      else setNote('Not on Varnox yet');
+    } catch {
+      setNote('Could not look that number up');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="contact-card">
+      <span className="avatar">{(name.trim()[0] ?? '?').toUpperCase()}</span>
+      <span className="body">
+        <b>{name}</b>
+        <span>{formatPhone(phone) || phone}</span>
+        {note ? <span className="hint">{note}</span> : null}
+      </span>
+      <button type="button" className="btn ghost" onClick={start} disabled={busy}>
+        Message
+      </button>
+    </div>
+  );
+}
+
 function disappearLabel(sec: number): string {
   if (sec === 86_400) return '24 hours';
   if (sec === 604_800) return '7 days';
@@ -66,6 +151,7 @@ export function ChatPane({
   messages,
   reads,
   reactions,
+  views,
   typing,
   disappearSec,
   hasMore,
@@ -80,6 +166,7 @@ export function ChatPane({
   onBack,
   onToggleTheme,
   onOpenInfo,
+  onStartChat,
   onSend,
   onReact,
   onReply,
@@ -97,6 +184,7 @@ export function ChatPane({
   messages: Message[];
   reads: Record<string, number>;
   reactions: Record<string, Record<string, string>>;
+  views: Record<string, string[]>;
   typing: string[];
   disappearSec: number;
   hasMore: boolean;
@@ -111,6 +199,8 @@ export function ChatPane({
   onBack: () => void;
   onToggleTheme: () => void;
   onOpenInfo: () => void;
+  /** Opens (or reuses) the direct chat with a user, the same path the new-chat panel takes. */
+  onStartChat: (userId: string) => void;
   onSend: (payload: Outgoing) => void;
   onReact: (msg: Message, emoji: string) => void;
   onReply: (draft: ReplyDraft) => void;
@@ -128,6 +218,9 @@ export function ChatPane({
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [onceOpened, setOnceOpened] = useState<Record<string, string>>({});
+  const [onceNote, setOnceNote] = useState<Record<string, string>>({});
+  const [onceBusy, setOnceBusy] = useState('');
   const [infoFor, setInfoFor] = useState<Message | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ, setSearchQ] = useState('');
@@ -141,6 +234,8 @@ export function ChatPane({
     setEditing(null);
     setSearchOpen(false);
     setSearchQ('');
+    setOnceOpened({});
+    setOnceNote({});
   }, [chat?.id]);
 
   const shown = useMemo(() => {
@@ -148,6 +243,35 @@ export function ChatPane({
     const q = searchQ.trim().toLowerCase();
     return messages.filter((m) => m.text.toLowerCase().includes(q));
   }, [messages, searchOpen, searchQ]);
+
+  /* View-once attachments are only ever fetched through /open, which hands back a short-lived
+     tokenised URL and marks the message spent. The stored mediaUrl is never used as a src. */
+  async function openOnce(msg: Message) {
+    if (onceBusy) return;
+    setOnceBusy(msg.id);
+    try {
+      const res = await post<{ url: string; mime: string | null; type: string; expiresInSec: number }>(
+        `/api/messages/${msg.id}/open`
+      );
+      setOnceOpened((prev) => ({ ...prev, [msg.id]: res.url }));
+      setOnceNote((prev) => {
+        const next = { ...prev };
+        delete next[msg.id];
+        return next;
+      });
+      if (msg.type === 'image') setLightbox(res.url);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '';
+      setOnceNote((prev) => ({
+        ...prev,
+        [msg.id]: /already been opened/i.test(message)
+          ? 'Already opened'
+          : msg.text || 'Could not open that attachment',
+      }));
+    } finally {
+      setOnceBusy('');
+    }
+  }
 
   if (!chat) {
     return (
@@ -285,6 +409,19 @@ export function ChatPane({
           const msgReactions = reactions[msg.id] ?? {};
           const reactionEntries = Object.entries(msgReactions);
           const selected = selection.includes(msg.id);
+          const onceViewers = views[msg.id] ?? [];
+          const onceUrl = onceOpened[msg.id] ?? '';
+          const onceByMe = onceViewers.includes(me.id) || Boolean(onceUrl);
+          const onceByOthers = onceViewers.some((id) => id !== me.id);
+          const onceLabel =
+            msg.type === 'audio' ? 'Voice message · view once' : 'Photo · view once';
+          const onceState = onceByMe
+            ? 'Opened'
+            : outgoing
+              ? onceByOthers
+                ? 'Opened'
+                : 'Sent · view once'
+              : (onceNote[msg.id] ?? '');
 
           return (
             <div key={msg.id}>
@@ -345,7 +482,7 @@ export function ChatPane({
                     </button>
                   ) : null}
 
-                  {msg.type === 'image' && msg.mediaUrl ? (
+                  {msg.type === 'image' && msg.mediaUrl && !msg.once ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       className="media"
@@ -359,8 +496,57 @@ export function ChatPane({
                     />
                   ) : null}
 
-                  {msg.type === 'audio' && msg.mediaUrl ? (
+                  {msg.type === 'audio' && msg.mediaUrl && !msg.once ? (
                     <VoiceNote src={msg.mediaUrl} sec={msg.audioSec ?? 0} />
+                  ) : null}
+
+                  {msg.once && msg.type === 'audio' && onceUrl ? (
+                    <VoiceNote src={onceUrl} sec={msg.audioSec ?? 0} />
+                  ) : null}
+
+                  {msg.once && (msg.type === 'image' || msg.type === 'audio') ? (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        minWidth: 200,
+                        maxWidth: '100%',
+                        padding: '6px 6px 4px',
+                        cursor: outgoing || onceByMe ? 'default' : 'pointer',
+                        opacity: onceByMe ? 0.75 : 1,
+                      }}
+                      onClick={(e) => {
+                        if (selecting || outgoing || onceByMe) return;
+                        e.stopPropagation();
+                        openOnce(msg);
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: '50%',
+                          border: '1.5px solid currentColor',
+                          display: 'grid',
+                          placeItems: 'center',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          lineHeight: 1,
+                          flex: '0 0 auto',
+                        }}
+                      >
+                        1
+                      </span>
+                      <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                        <b style={{ fontSize: 13.4 }}>{onceLabel}</b>
+                        {onceState ? (
+                          <span className="hint" style={{ fontSize: 12.6, lineHeight: 1.35 }}>
+                            {onceState}
+                          </span>
+                        ) : null}
+                      </span>
+                    </div>
                   ) : null}
 
                   {msg.type === 'file' && msg.mediaUrl ? (
@@ -375,6 +561,14 @@ export function ChatPane({
                         </span>
                       </span>
                     </a>
+                  ) : null}
+
+                  {msg.type === 'location' && msg.payload ? (
+                    <LocationBubble payload={msg.payload} />
+                  ) : null}
+
+                  {msg.type === 'contact' && msg.payload ? (
+                    <ContactBubble payload={msg.payload} onStartChat={onStartChat} />
                   ) : null}
 
                   {isEditing ? (

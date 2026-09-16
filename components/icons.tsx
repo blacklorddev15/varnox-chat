@@ -334,6 +334,25 @@ export function IconImage({ size = 20, className }: P) {
   );
 }
 
+export function IconLocation({ size = 22, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
+      <path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11Z" />
+      <circle cx="12" cy="10" r="2.6" />
+    </svg>
+  );
+}
+
+export function IconContact({ size = 22, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
+      <rect x="3" y="4" width="18" height="16" rx="3" />
+      <circle cx="12" cy="10.2" r="2.8" />
+      <path d="M7.4 16.9a4.9 4.9 0 0 1 9.2 0" />
+    </svg>
+  );
+}
+
 export function IconClock({ size = 20, className }: P) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
