@@ -3305,14 +3305,19 @@ export async function deleteAccount(userId: string, expected: string): Promise<b
   if (!row) return false;
   if (row.username.toLowerCase() !== String(expected ?? '').trim().toLowerCase()) return false;
 
-  await q(
+  // Whether the update matched is the answer, not whether it was issued. Returning true
+  // unconditionally is how this lied on a live account: the endpoint answered {"deleted":true}
+  // while the row was untouched, and the account stayed signed in. A write that reports success
+  // without checking the row is worse than one that fails, because nothing looks wrong.
+  const updated = await q<{ id: string }>(
     `update vx_users
         set deleted_at = $2,
             phone      = null
-      where id = $1 and deleted_at is null`,
+      where id = $1 and deleted_at is null
+      returning id`,
     [userId, Date.now()]
   );
-  return true;
+  return updated.length > 0;
 }
 
 /* ── the code shown when there is no SMS to send it with ───────────────────── */
