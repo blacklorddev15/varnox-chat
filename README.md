@@ -158,6 +158,7 @@ Two things guard against it now:
 | `GENERIC_SMS_URL`, `GENERIC_SMS_TOKEN`, `GENERIC_SMS_BODY` | for generic | Any JSON SMS gateway; `{to}` and `{text}` are substituted into the body |
 | `SMS_CODE_PEPPER` | no | Extra secret for hashing codes at rest; falls back to `SESSION_SECRET` |
 | `AUTO_MIGRATE` | no | `0` disables the app reconciling the schema on first request; see *Deploys and migrations* |
+| `ADMIN_USERNAMES` | no | Comma-separated handles allowed to reach `/api/admin/*`; see *Suspending and deleting accounts*. **Fails closed** — unset means nobody is an admin and every admin route answers 403 |
 
 With neither `SMS_PROVIDER` nor `SMS_DEV_MODE` set, the server says so instead of pretending a
 code was sent, so a half-configured deployment fails loudly rather than locking everyone out.
@@ -195,6 +196,36 @@ when opening the pool — you can paste Neon's string in verbatim.
 | `POST` | `/api/messages/forward` | Forward messages into other chats |
   | `POST` | `/api/upload` | Upload a photo, voice note or document |
   | `GET` | `/api/media/[id]` | Serve an uploaded image, voice note or document |
+| `POST` | `/api/account/delete` | Delete **your own** account (soft; confirmed by typing your handle) |
+| `POST` | `/api/account/review` | Ask for a suspension to be looked at — the one route a suspended account may call |
+| `GET` | `/api/admin/accounts` | *(owner)* List accounts; `?only=suspended` narrows, review requests first |
+| `POST` | `/api/admin/accounts/[id]/suspend` | *(owner)* Suspend an account, with an optional `reason` |
+| `POST` | `/api/admin/accounts/[id]/reinstate` | *(owner)* Lift a suspension |
+| `POST` | `/api/admin/accounts/[id]/delete` | *(owner)* Delete somebody else's account (soft; confirmed by typing their handle) |
+
+## Suspending and deleting accounts
+
+Two different things, and neither removes data:
+
+**Suspend** sets `suspended_at` on the account. It cannot sign in — `requireUser()` refuses it, and
+that is the single gate every authenticated route passes through — and it sees a banner saying the
+account cannot use Varnox, with a button to request a review. Nothing of theirs is touched: the
+chats, the messages and the profile all stay. Lifting it is a single column going back to null, so
+the account is exactly as it was.
+
+The account can still *sign in* while suspended, deliberately. Signing it out instead would leave
+it staring at the sign-in form with no explanation — which looks like a broken app — and would
+throw away the session needed to prove who is asking for a review.
+
+**Delete** is soft and permanent: it sets `deleted_at` and releases the phone number, so the
+account stops signing in and stops appearing in search, the directory, group rosters and the
+results of anyone trying to message it. Messages stay in the threads they were sent to, because
+they are not only that account's to remove. The handle is deliberately *not* released — a freed
+handle is an invitation to impersonate somebody who has just left.
+
+Owner powers need `ADMIN_USERNAMES` set to your handle, otherwise every `/api/admin/*` route
+answers 403. There is no admin screen in the app; these routes are called directly, and the
+requester's identity is always re-read from the session rather than taken from the request.
 
 ## Known limits
 

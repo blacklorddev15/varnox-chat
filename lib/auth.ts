@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { cookies } from 'next/headers';
 import type { SessionPayload, User, PublicUser } from './types';
-import { getUser, isAccountDeleted, isDeviceActive } from './db';
+import { getUser, isAccountDeleted, isAccountSuspended, isDeviceActive } from './db';
 
 const COOKIE = 'varnox_session';
 const SECRET = process.env.SESSION_SECRET || 'varnox-local-dev-secret';
@@ -123,11 +123,73 @@ export function handleFromPhone(phone: string): string {
   return `vx${phone.replace(/[^\d]/g, '').slice(-8)}`;
 }
 
-/** Server-sent session identity used by the API routes. */
+/**
+ * Server-sent session identity used by the API routes.
+ *
+ * A suspended account is refused here rather than in `currentUser`, and the difference matters.
+ * `currentUser` has to keep resolving a suspended account, because that is what lets the banner
+ * be drawn at all: returning null would sign the account out and show the sign-in screen, which
+ * looks like a broken app, and would leave no session to prove identity with when the account
+ * asks for a review.
+ *
+ * Every authenticated route reaches the database through this function, so refusing here closes
+ * all of them at once — the same argument the deletion check makes, one layer up.
+ */
 export async function requireUser(): Promise<User> {
   const user = await currentUser();
   if (!user) throw new UnauthorizedError();
+  if (await isAccountSuspended(user.id)) throw new SuspendedError();
   return user;
+}
+
+/**
+ * The owner's own accounts, named by handle, for the admin routes.
+ *
+ * An environment variable rather than a column, for the reason mayReadSmsInbox gives: a column
+ * can be granted by anything that can write to the table, so it is not a boundary, whereas this
+ * is only reachable by somebody who can already redeploy the app.
+ *
+ * Fails closed. If the variable is unset or empty, nobody is an admin — a missing configuration
+ * must not hand the power to everyone, and the alternative default (the first account, the
+ * oldest account) is a guess that would be wrong in exactly the situation nobody is watching.
+ */
+export function adminUsernames(): string[] {
+  return (process.env.ADMIN_USERNAMES || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+export function isAdmin(user: User | null): boolean {
+  if (!user) return false;
+  const allowed = adminUsernames();
+  return allowed.length > 0 && allowed.includes(user.username.toLowerCase());
+}
+
+/** An admin route's identity check. Re-read from the session; never from the request body. */
+export async function requireAdmin(): Promise<User> {
+  const user = await requireUser();
+  if (!isAdmin(user)) throw new ForbiddenError();
+  return user;
+}
+
+export class ForbiddenError extends Error {
+  constructor() {
+    super('forbidden');
+  }
+}
+
+/**
+ * Thrown for an account that is suspended, so a 403 can say which state it is in.
+ *
+ * Deliberately not an UnauthorizedError: the two lead to different screens. Unauthorized means
+ * sign in again; suspended means the account is locked out and may ask for a review. Collapsing
+ * them would send a suspended account round a sign-in loop it can never leave.
+ */
+export class SuspendedError extends Error {
+  constructor() {
+    super('suspended');
+  }
 }
 
 export class UnauthorizedError extends Error {

@@ -27,6 +27,7 @@ import type {
   Status,
   StatusAuthor,
   StatusViewer,
+  Suspension,
   User,
   UserSettings,
   WhatsAppPairing,
@@ -3303,6 +3304,21 @@ export async function isAccountDeleted(userId: string): Promise<boolean> {
 }
 
 /**
+ * Is this account suspended?
+ *
+ * The boolean form, for the one caller that only needs a yes or no: the session gate, which runs
+ * on every authenticated request and has no use for the reason or the review timestamp.
+ * Not cached, for the reason getSuspension gives.
+ */
+export async function isAccountSuspended(userId: string): Promise<boolean> {
+  const rows = await q<{ suspended_at: number | null }>(
+    `select suspended_at from vx_users where id = $1`,
+    [userId]
+  );
+  return rows[0]?.suspended_at != null;
+}
+
+/**
  * The subset of `ids` that has not been deleted.
  *
  * The list form of the question above, and one query for the whole set rather than one per id —
@@ -3361,6 +3377,169 @@ export async function deleteAccount(userId: string, expected: string): Promise<b
     [userId, Date.now()]
   );
   return updated.length > 0;
+}
+
+/* ── suspended accounts ────────────────────────────────────────────────────── */
+
+/**
+ * The suspension on an account, or null when it is in good standing.
+ *
+ * Asked rather than carried on the user row, for the reason `isAccountDeleted` gives: it costs
+ * nothing at the hundred places that build a User, and it cannot be forgotten at any of them.
+ *
+ * Not cached, and that is deliberate. `getUser` is cached for four seconds and a suspension
+ * written through a raw query would not invalidate it, so a cached answer here could keep
+ * serving "fine" after somebody had been suspended. A direct query takes effect at once, which
+ * is the only acceptable behaviour for a lockout.
+ */
+export async function getSuspension(userId: string): Promise<Suspension | null> {
+  const rows = await q<{
+    suspended_at: number | null;
+    suspend_reason: string | null;
+    review_requested_at: number | null;
+  }>(
+    `select suspended_at, suspend_reason, review_requested_at
+       from vx_users
+      where id = $1`,
+    [userId]
+  );
+  const row = rows[0];
+  if (!row || row.suspended_at == null) return null;
+  return {
+    at: Number(row.suspended_at),
+    reason: row.suspend_reason ?? null,
+    reviewRequestedAt: row.review_requested_at == null ? null : Number(row.review_requested_at),
+  };
+}
+
+/**
+ * Suspend an account.
+ *
+ * Any earlier review request is cleared, because a new suspension starts a new round: leaving
+ * the old timestamp in place would make the account's banner claim it had already asked about
+ * a suspension that had not happened yet.
+ *
+ * A deleted account is refused — `where ... and deleted_at is null` — so suspension cannot be
+ * used to re-open something that was closed for good.
+ *
+ * Returns whether a row actually matched, never an unconditional true.
+ */
+export async function suspendAccount(userId: string, reason: string | null): Promise<boolean> {
+  const rows = await q<{ id: string }>(
+    `update vx_users
+        set suspended_at         = $2,
+            suspend_reason       = $3,
+            review_requested_at  = null
+      where id = $1 and deleted_at is null
+      returning id`,
+    [userId, Date.now(), reason]
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Lift a suspension, putting the account back exactly as it was.
+ *
+ * `where suspended_at is not null` so the answer means something: lifting a suspension that was
+ * not in place returns false rather than reporting a change that did not happen.
+ */
+export async function reinstateAccount(userId: string): Promise<boolean> {
+  const rows = await q<{ id: string }>(
+    `update vx_users
+        set suspended_at        = null,
+            suspend_reason      = null,
+            review_requested_at = null
+      where id = $1 and suspended_at is not null
+      returning id`,
+    [userId]
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Record that a suspended account has asked for its suspension to be looked at.
+ *
+ * `where suspended_at is not null` for two reasons: a request from an account in good standing
+ * is meaningless, and it stops this being a write primitive that any signed-in account can
+ * point at itself at will.
+ */
+export async function requestReview(userId: string): Promise<boolean> {
+  const rows = await q<{ id: string }>(
+    `update vx_users
+        set review_requested_at = $2
+      where id = $1 and suspended_at is not null
+      returning id`,
+    [userId, Date.now()]
+  );
+  return rows.length > 0;
+}
+
+/** One row of the owner's account list. Never carries password material. */
+export type AdminAccount = {
+  id: string;
+  username: string;
+  displayName: string;
+  phone: string | null;
+  email: string | null;
+  createdAt: number;
+  lastSeen: number;
+  suspendedAt: number | null;
+  suspendReason: string | null;
+  reviewRequestedAt: number | null;
+  deletedAt: number | null;
+};
+
+/**
+ * The accounts the owner can act on, most recently suspended and reviewed first.
+ *
+ * Ordered so the rows needing a decision are at the top: a review request is a person waiting on
+ * an answer, a suspension is a decision already made. `only: 'suspended'` narrows to the second.
+ *
+ * Deleted accounts are excluded — nothing on this screen can act on one, so listing them would
+ * only offer buttons that do nothing.
+ */
+export async function listAccountsForAdmin(
+  only: 'all' | 'suspended' = 'all',
+  limit = 100
+): Promise<AdminAccount[]> {
+  const rows = await q<{
+    id: string;
+    username: string;
+    display_name: string;
+    phone: string | null;
+    email: string | null;
+    created_at: number;
+    last_seen: number;
+    suspended_at: number | null;
+    suspend_reason: string | null;
+    review_requested_at: number | null;
+    deleted_at: number | null;
+  }>(
+    `select id, username, display_name, phone, email, created_at, last_seen,
+            suspended_at, suspend_reason, review_requested_at, deleted_at
+       from vx_users
+      where deleted_at is null
+        and ($1 = 'all' or suspended_at is not null)
+      order by review_requested_at desc nulls last,
+               suspended_at desc nulls last,
+               last_seen desc
+      limit $2`,
+    [only, Math.max(1, Math.min(500, limit))]
+  );
+
+  return rows.map((r) => ({
+    id: r.id,
+    username: r.username,
+    displayName: r.display_name,
+    phone: r.phone ?? null,
+    email: r.email ?? null,
+    createdAt: Number(r.created_at),
+    lastSeen: Number(r.last_seen),
+    suspendedAt: r.suspended_at == null ? null : Number(r.suspended_at),
+    suspendReason: r.suspend_reason ?? null,
+    reviewRequestedAt: r.review_requested_at == null ? null : Number(r.review_requested_at),
+    deletedAt: r.deleted_at == null ? null : Number(r.deleted_at),
+  }));
 }
 
 /* ── the code shown when there is no SMS to send it with ───────────────────── */
