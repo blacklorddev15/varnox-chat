@@ -1401,6 +1401,31 @@ export async function unconsumeEmailCode(email: string, codeHash: string): Promi
   );
 }
 
+/**
+ * Whether this address was proved recently.
+ *
+ * The proof is a consumed code row — written by the server itself from a code only the mailbox
+ * received. That is why there is no signed ticket in this flow: a row the server wrote cannot be
+ * forged, where a bearer token is one more thing to get wrong, and one more thing to have to
+ * expire.
+ *
+ * Consumed, not merely present: an unconsumed row means a code was sent and never used, which
+ * proves nothing. The window is long enough to type a username and a password and no longer — it
+ * is evidence somebody was in the mailbox minutes ago, not a lasting attestation.
+ */
+export async function emailRecentlyConfirmed(
+  email: string,
+  withinMs = 30 * 60_000
+): Promise<boolean> {
+  const rows = await q(
+    `select 1 from vx_email_codes
+      where email = $1 and consumed_at is not null and consumed_at > $2
+      limit 1`,
+    [email, Date.now() - withinMs]
+  );
+  return rows.length > 0;
+}
+
 export async function clearEmailCode(email: string): Promise<void> {
   await q('delete from vx_email_codes where email = $1', [email]);
 }

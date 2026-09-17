@@ -248,6 +248,15 @@ export function AuthScreen({
     []
   );
 
+  /**
+   * Send the confirmation code.
+   *
+   * The code goes to the EMAIL, not the number. The number is still collected — it is how people
+   * find you and one of the ways to sign in — but proving you can receive a text costs money per
+   * message and proving you can read a mailbox does not. This is the only verification the wizard
+   * does, so it is also the only thing standing between a typed address and an account that claims
+   * it.
+   */
   async function sendCode(e?: React.FormEvent) {
     e?.preventDefault();
     if (busy) return;
@@ -256,12 +265,24 @@ export function AuthScreen({
       setError('Enter your number, including the country code');
       return;
     }
+    /*
+      Registration proves the email. Signing in still proves the number, and that is not a
+      leftover: every account created before this change was made by the phone step, most of them
+      with no password at all, so texting a code is the only way their owners can get back in.
+      Removing it here would not simplify anything, it would lock them out.
+    */
+    const registering = passwordMode === 'register';
+    const email = signupEmail.trim();
+    if (registering && !email) {
+      setError('Enter your email address — the code is sent there');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
       const res = await post<{ to: string; expiresInSec: number; resendInSec: number }>(
-        '/api/auth/otp/start',
-        { phone }
+        registering ? '/api/auth/email/send' : '/api/auth/otp/start',
+        registering ? { email } : { phone }
       );
       setDigits(Array(CODE_LENGTH).fill(''));
       setNotice(`We sent a 6-digit code to ${res.to}`);
@@ -320,16 +341,34 @@ export function AuthScreen({
     setBusy(true);
     setError('');
     try {
-      const res = await post<{ user: { displayName: string }; created: boolean }>(
-        '/api/auth/otp/verify',
-        { phone: composed(), code: value }
-      );
-      if (res.created) {
-        setName('');
-        setStep('name');
-      } else {
-        finish();
+      /**
+       * The code proves the address. It does not sign anybody in and it creates nothing.
+       *
+       * That is the change from the old step, which called /api/auth/otp/verify, made a
+       * passwordless account on the spot, and jumped the wizard to the picture — so a new account
+       * never chose a username or a password at all. Now the account is made at the end, from the
+       * number, the username and the password gathered along the way.
+       *
+       * The proof stays server-side: this marks the code row consumed, and /api/auth/register
+       * refuses an address that has no such row.
+       */
+      if (passwordMode === 'login') {
+        const res = await post<{ user: { displayName: string }; created: boolean }>(
+          '/api/auth/otp/verify',
+          { phone: composed(), code: value }
+        );
+        if (res.created) {
+          setName('');
+          setStep('name');
+        } else {
+          finish();
+        }
+        return;
       }
+      await post('/api/auth/email/confirm', { email: signupEmail.trim(), code: value });
+      setName('');
+      setSignupStep(2);
+      setStep('password');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
       setDigits(Array(CODE_LENGTH).fill(''));
@@ -604,16 +643,37 @@ export function AuthScreen({
                   required
                 />
                 <p className="hint" style={{ marginTop: 6 }}>
-                  {country
-                    ? `We'll send the code to ${composed()}`
-                    : 'Include the country code, for example +65 9123 4567.'}
+                  Include the country code, for example +65 9123 4567. This is how people find you.
                 </p>
               </div>
+
+              {/* Asked here, beside the number, because the code is sent to it — the two belong
+                  together on the screen where the visitor is proving who they are. Only while
+                  registering: signing in proves the number instead, and has no use for this. */}
+              {passwordMode === 'register' ? (
+                <div className="field-row">
+                  <label htmlFor="signupEmail">Email address</label>
+                  <input
+                    id="signupEmail"
+                    className="input"
+                    type="email"
+                    value={signupEmail}
+                    onChange={(e) => setSignupEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    inputMode="email"
+                    autoComplete="email"
+                    required
+                  />
+                  <p className="hint" style={{ marginTop: 6 }}>
+                    We'll send your 6-digit code here and nowhere else.
+                  </p>
+                </div>
+              ) : null}
 
               {error ? <p className="error">{error}</p> : null}
 
               <button className="btn" type="submit" disabled={busy}>
-                {busy ? 'Sending…' : 'Send code'}
+                {busy ? 'Sending…' : 'Get code'}
               </button>
             </form>
 
@@ -950,27 +1010,6 @@ export function AuthScreen({
                     <p className="hint" style={{ marginTop: 6 }}>
                       Lowercase letters, numbers, underscore or dot, 3-20 characters. This is how
                       people find you on Varnox.
-                    </p>
-                  </div>
-
-                  {/* Asked here rather than only in the profile. A code goes out after the
-                      account exists — not before — so leaving this blank costs nothing, and
-                      there is no step of this wizard that can fail because a mail did. */}
-                  <div className="field-row">
-                    <label htmlFor="signupEmail">Email address (optional)</label>
-                    <input
-                      id="signupEmail"
-                      className="input"
-                      type="email"
-                      value={signupEmail}
-                      onChange={(e) => setSignupEmail(e.target.value)}
-                      placeholder="you@example.com"
-                      inputMode="email"
-                      autoComplete="email"
-                    />
-                    <p className="hint" style={{ marginTop: 6 }}>
-                      We will email a code to confirm it. You can also add one later from your
-                      profile.
                     </p>
                   </div>
                 </>
