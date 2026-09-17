@@ -4104,6 +4104,23 @@ html[data-theme='dark'] .bots-field > label {
   font-size: 14px;
   line-height: 1.5;
 }
+/* display matters here, not decoration: an inline box ignores width, so a full-width button
+   that is written as a link silently stays the width of its own text. */
 .welcome-card .btn {
+  display: block;
   width: 100%;
+}
+
+/*
+  A .btn that happens to be an anchor.
+  
+  Links and buttons are both used to move around in this app, and which element was written is not
+  something a reader should be able to tell. A link does not inherit text-decoration the way a
+  button does, so the same control picked up an underline purely because of how it was written —
+  visible in the welcome card and in the bots screens, which both use links as buttons.
+*/
+a.btn {
+  text-decoration: none;
+  display: inline-block;
+  text-align: center;
 }
