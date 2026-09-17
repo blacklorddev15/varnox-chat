@@ -74,6 +74,13 @@ export const STEPS: Step[] = [
             on vx_users (lower(email)) where email is not null`,
   },
   {
+    // Null until a code has proved the address. Accounts that existed before this column are
+    // unverified, which is true rather than an oversight: nothing had checked them.
+    kind: 'column',
+    label: 'vx_users.email_verified_at',
+    sql: `alter table vx_users add column if not exists email_verified_at bigint`,
+  },
+  {
     kind: 'table',
     label: 'vx_otp',
     sql: `create table if not exists vx_otp (
@@ -105,6 +112,26 @@ export const STEPS: Step[] = [
     kind: 'index',
     label: 'vx_otp_rate_window',
     sql: `create index if not exists vx_otp_rate_window on vx_otp_rate (window_start)`,
+  },
+  {
+    // The same job vx_otp does for a phone, kept in its own table rather than re-keying that
+    // one: vx_otp is carrying live logins and already holds rows.
+    kind: 'table',
+    label: 'vx_email_codes',
+    sql: `create table if not exists vx_email_codes (
+            email       text primary key,
+            code_hash   text not null,
+            sent_at     bigint not null,
+            expires_at  bigint not null,
+            attempts    integer not null default 0,
+            consumed_at bigint,
+            sent_ip     text
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_email_codes_expires',
+    sql: `create index if not exists vx_email_codes_expires on vx_email_codes (expires_at)`,
   },
   {
     kind: 'column',
@@ -510,6 +537,28 @@ export const STEPS: Step[] = [
     label: 'vx_sms_outbox_phone',
     sql: `create index if not exists vx_sms_outbox_phone
             on vx_sms_outbox (to_phone, created_at desc)`,
+  },
+  {
+    // Written from exactly one place — the mail module's dev-mode branch — because the recorded
+    // body carries a live code. Recording it whenever a mail really sends would put plaintext
+    // codes in the database, which is the thing hashing them exists to avoid.
+    kind: 'table',
+    label: 'vx_email_outbox',
+    sql: `create table if not exists vx_email_outbox (
+            id         bigserial primary key,
+            to_email   text    not null,
+            body       text    not null,
+            provider   text    not null,
+            ok         boolean not null default true,
+            error      text,
+            created_at bigint  not null
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_email_outbox_email',
+    sql: `create index if not exists vx_email_outbox_email
+            on vx_email_outbox (to_email, created_at desc)`,
   },
   // Bots. Additive like everything above, so a deploy that adds them and a deploy that ignores
   // them can serve the same database without either noticing — which is what lets this land

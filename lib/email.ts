@@ -1,9 +1,14 @@
 /**
  * Email addresses, as an account credential.
  *
- * This module only normalises and validates. Nothing is sent yet — an email code channel
- * and a password reset both need a mail provider (Resend, SES, or any SMTP gateway), which
- * is a separate decision from collecting the address.
+ * This module only normalises and validates. Delivery lives in lib/mail.ts and the code that
+ * proves an address in lib/email-code.ts, kept apart because the rules about what an address IS
+ * have nothing to do with how a message about it travels — the second changes provider, the
+ * first does not.
+ *
+ * This comment used to say nothing was sent yet. That is no longer true: a signup address gets a
+ * confirmation code. A password reset still does not exist, and when it does it needs the mail
+ * provider that now exists and nothing else from here.
  *
  * The rules here are deliberately the same shape as normalisePhone: produce one canonical
  * form, so that comparison, uniqueness and lookup cannot disagree about whether two strings

@@ -277,14 +277,165 @@ export function NewGroupPanel({
   );
 }
 
+/**
+ * Confirming the address already saved on the account.
+ *
+ * A separate action from Save rather than a part of it, because the proof arrives by mail and so
+ * cannot be one atomic write with the rest of the form. It is also keyed to the exact string the
+ * server holds — the code row is written under that address — which is why ProfilePanel only
+ * offers this once the field agrees with what is saved. Without that check, editing the address
+ * and pressing Confirm would mail a code for the new address and then try to confirm the old.
+ *
+ * Nothing here takes the user out of the app or blocks them. An unconfirmed address is a
+ * missing convenience, not a broken account: the number still signs them in.
+ */
+function EmailConfirm({ me, onVerified }: { me: PublicUser; onVerified: () => void }) {
+  const [code, setCode] = useState('');
+  const [sent, setSent] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  /** The recorded message, in dev mode only. Null means there is nothing to show. */
+  const [dev, setDev] = useState<{ body: string } | null>(null);
+
+  useEffect(() => {
+    if (seconds <= 0) return;
+    const id = window.setInterval(() => setSeconds((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => window.clearInterval(id);
+  }, [seconds]);
+
+  const digits = code.replace(/\D/g, '');
+
+  async function send() {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    setDev(null);
+    try {
+      const res = await post<{
+        sent: boolean;
+        to: string;
+        resendInSec?: number;
+        alreadyVerified?: boolean;
+      }>('/api/auth/email/start');
+
+      // Already confirmed somewhere else — a second tab, or a previous session. Take the state
+      // the server reports rather than showing a "sent" message for a mail that was not sent.
+      if (res.alreadyVerified) {
+        onVerified();
+        return;
+      }
+
+      setSent(true);
+      // The server's own number, not a hardcoded 60: the cooldown lives on the server and this
+      // countdown only has to agree with it.
+      setSeconds(res.resendInSec || 60);
+      setNotice(`Code sent to ${res.to}.`);
+
+      try {
+        const inbox = await api<{ available: boolean; body?: string }>('/api/auth/email/inbox');
+        if (inbox.available && inbox.body) setDev({ body: inbox.body });
+      } catch {
+        /* The inbox is a reading convenience. A failure here must not read as a send failure. */
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not send the code');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy || digits.length !== 6) return;
+    setBusy(true);
+    setError('');
+    try {
+      await post('/api/auth/email/verify', { code: digits });
+      onVerified();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not confirm that code');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (me.emailVerifiedAt) {
+    return (
+      <p className="hint" style={{ marginTop: -8, marginBottom: 14 }}>
+        Confirmed — this address is yours.
+      </p>
+    );
+  }
+
+  return (
+    <form onSubmit={submit} style={{ marginBottom: 6 }}>
+      <p className="hint" style={{ marginTop: -8 }}>
+        Not confirmed yet.
+      </p>
+
+      {sent ? (
+        <div className="field-row" style={{ marginTop: 10 }}>
+          <label htmlFor="emailCode">Enter the code we emailed</label>
+          <input
+            id="emailCode"
+            className="input"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="000000"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+          />
+        </div>
+      ) : null}
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+        <button type="button" className="btn ghost" onClick={send} disabled={busy || seconds > 0}>
+          {seconds > 0
+            ? `Resend in ${seconds}s`
+            : sent
+              ? 'Resend code'
+              : 'Send a confirmation code'}
+        </button>
+        {sent ? (
+          <button type="submit" className="btn" disabled={busy || digits.length !== 6}>
+            Confirm
+          </button>
+        ) : null}
+      </div>
+
+      {dev ? (
+        <p className="hint" style={{ marginTop: 8 }}>
+          {dev.body}
+        </p>
+      ) : null}
+      {notice ? (
+        <p className="hint" style={{ marginTop: 8 }}>
+          {notice}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="error" style={{ marginTop: 8 }}>
+          {error}
+        </p>
+      ) : null}
+    </form>
+  );
+}
+
 export function ProfilePanel({
   me,
   onBack,
   onSave,
+  onEmailVerified,
 }: {
   me: PublicUser;
   onBack: () => void;
   onSave: (body: Record<string, unknown>) => void;
+  /** Re-reads the account, so the confirmed state replaces the button that produced it. */
+  onEmailVerified: () => void;
 }) {
   const [displayName, setDisplayName] = useState(me.displayName);
   const [about, setAbout] = useState(me.about);
@@ -407,9 +558,26 @@ export function ProfilePanel({
         />
         <p className="hint" style={{ marginTop: 6 }}>
           Optional, and never shown to anyone else. It is how you sign in and how you get back into
-          the account if you lose the number. Clear it to remove it.
+          the account if you lose the number. Clear it to remove it. Add one and we will send a
+          code to confirm it.
         </p>
       </div>
+
+      {/*
+        The confirmation control, paired with the address it is about.
+
+        Only while the field still matches what the server holds: a code is keyed to the exact
+        address string, so offering Confirm after an unsaved edit would send a code for the new
+        address and then try to confirm the old one. Changing it is a Save first, then confirm —
+        which is also the honest order, because until it is saved nothing is sent anywhere.
+      */}
+      {me.email && email.trim().toLowerCase() === me.email ? (
+        <EmailConfirm me={me} onVerified={onEmailVerified} />
+      ) : me.email ? (
+        <p className="hint" style={{ marginTop: -8, marginBottom: 14 }}>
+          Save your profile, then confirm this address.
+        </p>
+      ) : null}
 
       <div className="field-row">
         <label htmlFor="about">About</label>

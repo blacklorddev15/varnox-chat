@@ -80,6 +80,16 @@ export async function PATCH(req: Request) {
           next.email = email;
         }
       }
+      /**
+       * A changed address drops the proof, on the object as well as in the row.
+       *
+       * `saveUser` clears the column when the address moves, so the database is right either
+       * way; this is what keeps the REPLY right. `next` started as a copy of `me`, so without
+       * this the response would hand back the previous address's verification and the profile
+       * screen would say "Confirmed" about an address that has just been typed for the first
+       * time — until the next load quietly corrected it.
+       */
+      if (next.email !== me.email) next.emailVerifiedAt = null;
     }
 
     await saveUser(next);

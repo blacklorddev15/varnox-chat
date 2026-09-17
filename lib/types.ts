@@ -5,8 +5,16 @@ export type User = {
   username: string;
   /** Canonical "+<digits>" login identifier. Null only for accounts made before phone login existed. */
   phone: string | null;
-  /** Lowercased address, unique when present. Not yet verified by any proof of ownership. */
+  /** Lowercased address, unique when present. */
   email: string | null;
+  /**
+   * When the address was confirmed by a code, or null while it is unproved.
+   *
+   * Separate from `email` because an address can be present and wrong. Accounts made before
+   * this existed, and addresses never confirmed since, both read null — which is the same
+   * thing: nothing has ever checked them.
+   */
+  emailVerifiedAt: number | null;
   displayName: string;
   about: string;
   avatar: string | null;
@@ -22,6 +30,8 @@ export type PublicUser = {
   phone: string | null;
   /** Returned to the account holder for their own profile; other users never see it. */
   email: string | null;
+  /** Owner only, on the same rule as the address itself. Null for anybody else's profile. */
+  emailVerifiedAt: number | null;
   displayName: string;
   about: string;
   avatar: string | null;

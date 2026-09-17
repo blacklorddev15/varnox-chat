@@ -38,7 +38,7 @@ function nextHandle(): string {
 
 async function makeAccount(id: string, username: string) {
   await saveUser({
-    id, username, phone: null, email: null, displayName: username, about: '', avatar: null,
+    id, username, phone: null, email: null, emailVerifiedAt: null, displayName: username, about: '', avatar: null,
     pwHash: 'otp$disabled', createdAt: Date.now(), lastSeen: Date.now(),
   });
 }

@@ -69,6 +69,7 @@ async function makeAccount(id: string, username: string) {
     username,
     phone: null,
     email: null,
+    emailVerifiedAt: null,
     displayName: username,
     about: '',
     avatar: null,

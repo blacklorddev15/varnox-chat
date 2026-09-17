@@ -50,6 +50,7 @@ describe.skipIf(!hasDatabase)('the bot token guard', () => {
       username: `authtest_${run}`,
       phone: null,
       email: null,
+      emailVerifiedAt: null,
       displayName: `authtest_${run}`,
       about: '',
       avatar: null,

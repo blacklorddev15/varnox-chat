@@ -43,6 +43,9 @@ export async function presentMember(id: string, viewerId: string): Promise<Publi
     // Only ever your own address. An email is not a contact detail you publish by signing
     // up, so other members — and search results — get null regardless of privacy settings.
     email: isSelf ? (user.email ?? null) : null,
+    // Its confirmation state follows the same rule rather than being treated as a separate
+    // fact: whether an address was proved is part of that address being private.
+    emailVerifiedAt: isSelf ? (user.emailVerifiedAt ?? null) : null,
     displayName: user.displayName,
     about: user.about,
     avatar: showPhoto ? user.avatar : null,

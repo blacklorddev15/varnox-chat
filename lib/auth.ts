@@ -111,6 +111,7 @@ export function publicUser(u: User): PublicUser {
     username: u.username,
     phone: u.phone ?? null,
     email: u.email ?? null,
+    emailVerifiedAt: u.emailVerifiedAt ?? null,
     displayName: u.displayName,
     about: u.about,
     avatar: u.avatar,

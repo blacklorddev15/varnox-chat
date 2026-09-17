@@ -60,6 +60,7 @@ type UserRow = {
   username: string;
   phone: string | null;
   email: string | null;
+  email_verified_at: number | null;
   display_name: string;
   about: string;
   avatar: string | null;
@@ -74,6 +75,7 @@ function toUser(r: UserRow): User {
     username: r.username,
     phone: r.phone ?? null,
     email: r.email ?? null,
+    emailVerifiedAt: r.email_verified_at === null ? null : Number(r.email_verified_at),
     displayName: r.display_name,
     about: r.about ?? '',
     avatar: r.avatar ?? null,
@@ -89,6 +91,9 @@ function toUser(r: UserRow): User {
  * The address is deliberately null: it is a login credential, not a published contact
  * detail, so it is only ever returned to the owner themselves (see publicUser in lib/auth
  * and presentMember with isSelf).
+ *
+ * Its confirmation state is nulled for the same reason and by the same rule. Whether somebody
+ * has proved an address is private to them, and it is of no use to anyone else anyway.
  */
 function toPublicUser(u: User): PublicUser {
   return {
@@ -96,6 +101,7 @@ function toPublicUser(u: User): PublicUser {
     username: u.username,
     phone: u.phone ?? null,
     email: null,
+    emailVerifiedAt: null,
     displayName: u.displayName,
     about: u.about,
     avatar: u.avatar,
@@ -111,6 +117,24 @@ export async function getUser(id: string): Promise<User | null> {
   });
 }
 
+/**
+ * Write the account row.
+ *
+ * `email_verified_at` is NOT taken from the argument, and that is deliberate rather than an
+ * omission: which addresses have been proved is a fact only the server establishes, from a code
+ * that arrived somewhere else. A caller holding a stale `User` would otherwise be able to assert
+ * it, so the column is only ever moved by markEmailVerified.
+ *
+ * It is, however, CLEARED here when the address changes. A proof belongs to the address it was
+ * made about, and moving that flag to a new address would report an unproved address as proved —
+ * and, because the confirmation endpoints treat a non-null flag as "already done", it would also
+ * make the new address impossible to prove for as long as it stayed on the account. This is the
+ * single writer of the column, and every route that changes an address comes through here, so
+ * this is the one place that can notice.
+ *
+ * `is distinct from` rather than `<>`: clearing an address moves it to null, and `null <> null`
+ * is null, not true, so a plain comparison would keep the flag on the way to having no address.
+ */
 export async function saveUser(user: User): Promise<void> {
   await q(
     `insert into vx_users
@@ -124,7 +148,11 @@ export async function saveUser(user: User): Promise<void> {
        avatar = excluded.avatar,
        pw_hash = excluded.pw_hash,
        last_seen = excluded.last_seen,
-       email = excluded.email`,
+       email = excluded.email,
+       email_verified_at = case
+         when vx_users.email is distinct from excluded.email then null
+         else vx_users.email_verified_at
+       end`,
     [
       user.id,
       user.username,
@@ -1250,6 +1278,153 @@ export async function unconsumeOtp(phone: string, codeHash: string): Promise<voi
 
 export async function clearOtp(phone: string): Promise<void> {
   await q('delete from vx_otp where phone = $1', [phoneKey(phone)]);
+}
+
+/* ── email verification (confirmation codes) ───────────────────────────── */
+
+/**
+ * The email counterpart of vx_otp, and deliberately a separate table rather than a second kind
+ * of key on that one — vx_otp is keyed by phone and is carrying live logins, and re-keying a
+ * table which already holds rows is how a working path gets broken.
+ *
+ * The address must already be canonical (`normaliseEmail` lowercases it). Unlike phoneKey,
+ * nothing is stripped on the way in: an address has no digits-only equivalent, and the column is
+ * compared exactly, so a caller that skips normalisation would write a row that can never be
+ * found again.
+ */
+type EmailCodeRow = {
+  email: string;
+  code_hash: string;
+  sent_at: number;
+  expires_at: number;
+  attempts: number;
+  consumed_at: number | null;
+};
+
+export type EmailCode = {
+  email: string;
+  codeHash: string;
+  sentAt: number;
+  expiresAt: number;
+  attempts: number;
+  consumedAt: number | null;
+};
+
+/**
+ * Store the code in flight for an address.
+ *
+ * One row per address: a new send replaces the previous code and resets the attempt count, so an
+ * old code can never be replayed after a resend. Rows with nothing left to give are swept here,
+ * which is the only place that needs to happen.
+ */
+export async function putEmailCode(row: {
+  email: string;
+  codeHash: string;
+  sentAt: number;
+  expiresAt: number;
+  ip?: string | null;
+}): Promise<void> {
+  await q('delete from vx_email_codes where expires_at < $1', [row.sentAt - 86_400_000]);
+  await q(
+    `insert into vx_email_codes (email, code_hash, sent_at, expires_at, attempts, consumed_at, sent_ip)
+     values ($1, $2, $3, $4, 0, null, $5)
+     on conflict (email) do update set
+       code_hash = excluded.code_hash,
+       sent_at = excluded.sent_at,
+       expires_at = excluded.expires_at,
+       attempts = 0,
+       consumed_at = null,
+       sent_ip = excluded.sent_ip`,
+    [row.email, row.codeHash, row.sentAt, row.expiresAt, row.ip ?? null]
+  );
+}
+
+export async function getEmailCode(email: string): Promise<EmailCode | null> {
+  const rows = await q<EmailCodeRow>('select * from vx_email_codes where email = $1', [email]);
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    email: r.email,
+    codeHash: r.code_hash,
+    sentAt: Number(r.sent_at),
+    expiresAt: Number(r.expires_at),
+    attempts: Number(r.attempts),
+    consumedAt: r.consumed_at === null ? null : Number(r.consumed_at),
+  };
+}
+
+/**
+ * Spend one guess, atomically. Reading the row, deciding, and only then writing would let a
+ * concurrent burst each see the same count and all be hashed, so one code could absorb far more
+ * than the allowance and the six-digit space would stop being safe.
+ */
+export async function claimEmailCodeAttempt(
+  email: string,
+  now: number,
+  max: number
+): Promise<number | null> {
+  const rows = await q<{ attempts: number }>(
+    `update vx_email_codes set attempts = attempts + 1
+     where email = $1 and consumed_at is null and expires_at > $2 and attempts < $3
+     returning attempts`,
+    [email, now, max]
+  );
+  return rows[0] ? Number(rows[0].attempts) : null;
+}
+
+/**
+ * Claim the code. The update only matches while the row is still unconsumed, so of N concurrent
+ * verifications carrying the same correct code exactly one wins and the rest are told it has
+ * already been used. The row is kept rather than deleted, as with vx_otp.
+ */
+export async function consumeEmailCode(email: string): Promise<boolean> {
+  const rows = await q(
+    'update vx_email_codes set consumed_at = $2 where email = $1 and consumed_at is null returning email',
+    [email, Date.now()]
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Hand a code back, for the same reason lib/otp.ts has unconsumeOtp: the code is spent before
+ * the account is written, so a failure after that point would otherwise cost the user an email
+ * they can only replace by asking for another.
+ *
+ * Scoped by `codeHash` and not just the address: between the consume and this call a resend may
+ * have replaced the row, and undoing that one instead would reopen a code the user was never
+ * told about.
+ */
+export async function unconsumeEmailCode(email: string, codeHash: string): Promise<void> {
+  await q(
+    'update vx_email_codes set consumed_at = null where email = $1 and code_hash = $2 and expires_at > $3',
+    [email, codeHash, Date.now()]
+  );
+}
+
+export async function clearEmailCode(email: string): Promise<void> {
+  await q('delete from vx_email_codes where email = $1', [email]);
+}
+
+/**
+ * Mark an address confirmed.
+ *
+ * Guarded on the user id AND the address together, so a session for one account cannot confirm
+ * an address belonging to another — the pair has to match, not just the id. Passing a null or
+ * empty address matches nothing, because `lower(email) = null` is never true.
+ *
+ * `coalesce` keeps the first time it was confirmed, so a repeated call is a no-op rather than
+ * something that quietly rewrites when it happened. Returns false when nothing matched, which is
+ * how the caller tells "confirmed" from "there was nothing to confirm".
+ */
+export async function markEmailVerified(userId: string, email: string): Promise<boolean> {
+  const rows = await q(
+    `update vx_users
+        set email_verified_at = coalesce(email_verified_at, $3)
+      where id = $1 and lower(email) = $2 and deleted_at is null
+      returning id`,
+    [userId, email, Date.now()]
+  );
+  return rows.length > 0;
 }
 
 export type RateSlot = {
@@ -3961,6 +4136,35 @@ export async function devCodeForNewNumber(
       order by o.created_at desc, o.id desc
       limit 1`,
     [phone, Date.now() - DEV_CODE_WINDOW_MS]
+  );
+
+  const row = rows[0];
+  return row ? { body: row.body, at: Number(row.created_at) } : null;
+}
+
+/**
+ * The code that was just made for an address, for when there is no mail to send it with.
+ *
+ * Unlike devCodeForNewNumber this query carries no guard of its own, and the difference is the
+ * point. That one has to refuse numbers that already have an account, because a phone code is
+ * also how you sign IN — answering for a registered number would let anyone who knows it read
+ * the code and enter that account. A confirmation code cannot sign anybody in: the route that
+ * accepts one takes the address from the session, not from the request. So this is only ever
+ * reachable by a signed-in caller asking about their own address, and the route enforces that.
+ */
+export async function devCodeForEmail(
+  email: string
+): Promise<{ body: string; at: number } | null> {
+  if (!email) return null;
+
+  const rows = await q<{ body: string; created_at: number }>(
+    `select o.body, o.created_at
+       from vx_email_outbox o
+      where o.to_email = $1
+        and o.created_at > $2
+      order by o.created_at desc, o.id desc
+      limit 1`,
+    [email, Date.now() - DEV_CODE_WINDOW_MS]
   );
 
   const row = rows[0];

@@ -136,13 +136,22 @@ export function AuthScreen({
   const [linkCode, setLinkCode] = useState('');
   const [passwordMode, setPasswordMode] = useState<'login' | 'register'>('login');
   /**
-   * Creating an account collects a phone number, then a username, then a password, then an
-   * optional profile picture, then the terms, then a decision about notifications, one step
-   * at a time. The username is the handle people search for, which is why it is asked for
-   * rather than generated silently.
+   * Creating an account collects a phone number, then a username and an address, then a
+   * password, then an optional profile picture, then the terms, then a decision about
+   * notifications, one step at a time. The username is the handle people search for, which is
+   * why it is asked for rather than generated silently.
    */
   const [signupStep, setSignupStep] = useState<1 | 2 | 3 | 4 | 5 | 6>(1);
   const [username, setUsername] = useState('');
+  /**
+   * The address a confirmation code is sent to. Optional here for the same reason it is optional
+   * everywhere else: the number is what signs you in.
+   *
+   * Asked at signup because the server has always accepted an address on this request and no
+   * client ever sent one, which left the code-sending path in the register route unreachable —
+   * and because "confirm the address you signed up with" needs an address to have been given.
+   */
+  const [signupEmail, setSignupEmail] = useState('');
   /** Step 5: the wizard only moves on with the box ticked. */
   const [termsAccepted, setTermsAccepted] = useState(false);
   /** Step 6: null until the permission question has been answered or skipped. */
@@ -511,6 +520,9 @@ export function AuthScreen({
           phone: composed(),
           username: username.trim().toLowerCase(),
           password,
+          // Blank is sent as-is and the server treats it as no address at all, so the wizard
+          // does not have to decide whether the field was filled in.
+          email: signupEmail,
           // Nothing about Google is sent from here. The claim that a Google account was
           // verified travels in an httpOnly cookie the callback set, which the server reads —
           // so this request is byte-for-byte what it was before Google existed.
@@ -916,23 +928,46 @@ export function AuthScreen({
               ) : null}
 
               {signupStep === 2 ? (
-                <div className="field-row">
-                  <label htmlFor="signupUsername">Username</label>
-                  <input
-                    id="signupUsername"
-                    className="input"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="your.name"
-                    autoComplete="username"
-                    autoCapitalize="none"
-                    autoFocus
-                  />
-                  <p className="hint" style={{ marginTop: 6 }}>
-                    Lowercase letters, numbers, underscore or dot, 3-20 characters. This is how
-                    people find you on Varnox.
-                  </p>
-                </div>
+                <>
+                  <div className="field-row">
+                    <label htmlFor="signupUsername">Username</label>
+                    <input
+                      id="signupUsername"
+                      className="input"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      placeholder="your.name"
+                      autoComplete="username"
+                      autoCapitalize="none"
+                      autoFocus
+                    />
+                    <p className="hint" style={{ marginTop: 6 }}>
+                      Lowercase letters, numbers, underscore or dot, 3-20 characters. This is how
+                      people find you on Varnox.
+                    </p>
+                  </div>
+
+                  {/* Asked here rather than only in the profile. A code goes out after the
+                      account exists — not before — so leaving this blank costs nothing, and
+                      there is no step of this wizard that can fail because a mail did. */}
+                  <div className="field-row">
+                    <label htmlFor="signupEmail">Email address (optional)</label>
+                    <input
+                      id="signupEmail"
+                      className="input"
+                      type="email"
+                      value={signupEmail}
+                      onChange={(e) => setSignupEmail(e.target.value)}
+                      placeholder="you@example.com"
+                      inputMode="email"
+                      autoComplete="email"
+                    />
+                    <p className="hint" style={{ marginTop: 6 }}>
+                      We will email a code to confirm it. You can also add one later from your
+                      profile.
+                    </p>
+                  </div>
+                </>
               ) : null}
 
               {signupStep === 3 ? (

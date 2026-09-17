@@ -22,8 +22,9 @@ Live: https://varnox-chat.vercel.app
   The address is stored lowercased and is unique case-insensitively (a partial unique index on
   `lower(email)`), it signs you in alongside the number and your username, and it is the intended
   way back into the account if the number is lost. It is **not** visible to anyone else: every
-  projection of another member returns `null` for it, and the address is unverified until an email
-  confirmation channel ships.
+  projection of another member returns `null` for it. Whether it has been confirmed is recorded on
+  the account (`email_verified_at`, null until proved) rather than assumed from the fact that one
+  was typed in.
 - **View-once photos and voice notes** — flick the "1" toggle in the composer and the next photo
   or recording can be opened by the recipient exactly once. The flag is enforced by the data, not
   by the UI: media marked once is served only with a token minted by `POST /api/messages/<id>/open`,
@@ -36,6 +37,21 @@ Live: https://varnox-chat.vercel.app
   60-second resend cooldown, because every message costs money at the provider. The start endpoint
   answers the same way whether or not the number has an account, so it cannot be used to discover
   who is registered.
+- **Email confirmation proves the address, not the person** — signing up with an address sends it a
+  6-digit code, and entering that code confirms the signed-in account controls the mailbox. Unlike
+  phone login it is not a way in: `POST /api/auth/email/verify` reads the address from the session
+  and only the code from the body, so a code can only ever confirm the address its holder is
+  already signed in as, and a code cannot be exchanged for a session. The code itself is never
+  stored — only an HMAC keyed by the server secret with the address mixed in — so a database leak
+  yields nothing usable and a code seen for one address cannot be replayed against another. It
+  lives 10 minutes, dies after five wrong guesses, and sending is capped at 3 per address per 15
+  minutes and 10 per IP per hour (the IP budget is shared with SMS) behind a 60-second resend
+  cooldown. The address is asked for during signup but is optional there, as it is everywhere, and
+  it can be added or changed later from the profile screen — where the confirm button and the
+  resend both live, next to the address they are about.
+  **An unconfirmed address never blocks using the app**: the account is real and the session is
+  issued before the code is even sent, a failed send is logged and swallowed rather than failing
+  the signup, and nothing about the app depends on the address being confirmed.
 - **Password sign-in still works** — accounts created before phone login keep their password, one
   tap away behind *Use a password instead*, and the identifier field accepts the phone number, the
   email address or the username. Passwords are hashed with scrypt (per-user salt); the session is an
@@ -157,11 +173,18 @@ Two things guard against it now:
 | `MESSAGEBIRD_API_KEY`, `MESSAGEBIRD_ORIGINATOR` | for MessageBird | MessageBird credentials |
 | `GENERIC_SMS_URL`, `GENERIC_SMS_TOKEN`, `GENERIC_SMS_BODY` | for generic | Any JSON SMS gateway; `{to}` and `{text}` are substituted into the body |
 | `SMS_CODE_PEPPER` | no | Extra secret for hashing codes at rest; falls back to `SESSION_SECRET` |
+| `MAIL_PROVIDER` | one of these two | `resend` or `console` — the provider that delivers signup confirmation codes |
+| `MAIL_DEV_MODE` | one of these two | `1` prints confirmation codes to the server log instead of sending them, for local work |
+| `RESEND_API_KEY` | for Resend | API key from the Resend dashboard |
+| `MAIL_FROM` | for Resend | The verified sender the mail claims to come from, e.g. `Varnox <no-reply@varnoxapp.blacklord.tech>`. **No default**, deliberately — the sending domain (here `varnoxapp.blacklord.tech`) must be verified in Resend with the DNS records Resend provides first; an unverified domain is rejected outright. Resend's shared test sender `onboarding@resend.dev` only delivers to the account's own inbox, so it is useful for a first test and never for production |
+| `EMAIL_CODE_PEPPER` | no | Extra secret for hashing confirmation codes at rest; falls back to `SMS_CODE_PEPPER`, then `SESSION_SECRET` |
 | `AUTO_MIGRATE` | no | `0` disables the app reconciling the schema on first request; see *Deploys and migrations* |
 | `ADMIN_USERNAMES` | no | Comma-separated handles allowed to reach `/api/admin/*`; see *Suspending and deleting accounts*. **Fails closed** — unset means nobody is an admin and every admin route answers 403 |
 
 With neither `SMS_PROVIDER` nor `SMS_DEV_MODE` set, the server says so instead of pretending a
 code was sent, so a half-configured deployment fails loudly rather than locking everyone out.
+Mail is the same: with neither `MAIL_PROVIDER` nor `MAIL_DEV_MODE` set, the server refuses to
+claim it sent a confirmation mail when nothing left.
 
 `pg` does not understand Neon's `channel_binding=require` parameter, so `lib/pg.ts` strips it
 when opening the pool — you can paste Neon's string in verbatim.
@@ -175,6 +198,9 @@ when opening the pool — you can paste Neon's string in verbatim.
 | `POST` | `/api/auth/logout` | Sign out |
 | `POST` | `/api/auth/otp/start` | Send a login code to a phone number (throttled per number and per IP) |
 | `POST` | `/api/auth/otp/verify` | Check the code, sign in, and create the account if the number is new |
+| `POST` | `/api/auth/email/start` | Send a signup confirmation code to the signed-in account's own address (throttled per address and per IP) |
+| `POST` | `/api/auth/email/verify` | Check the code, taken against the session's address, and mark it confirmed |
+| `GET` | `/api/auth/email/inbox` | *(dev mode)* The last confirmation mail for the signed-in account, for when nothing is really being sent |
 | `GET` | `/api/health` | Whether the database matches the code; names anything missing (503 when it does not) |
 | `GET` / `PATCH` | `/api/me` | Read or update your profile |
 | `GET` | `/api/users?q=` | Find people by username (blocked accounts are hidden) |

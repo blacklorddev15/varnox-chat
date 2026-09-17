@@ -904,6 +904,25 @@ export function Messenger({
     [flash]
   );
 
+  /**
+   * Re-read the account.
+   *
+   * Needed because confirming an address changes a field the client cannot set: the server
+   * decides it, from a code that arrived somewhere else. Without this the pane would keep
+   * offering to confirm an address that is already confirmed, until the next page load.
+   *
+   * A failure is swallowed deliberately. The value already held is still a truthful thing to
+   * show — it is what the server last said — and the next load corrects it either way.
+   */
+  const refreshMe = useCallback(async () => {
+    try {
+      const res = await api<{ user: PublicUser | null }>('/api/me');
+      if (res.user) setMe(res.user);
+    } catch {
+      /* leave the last known value in place */
+    }
+  }, []);
+
   const joinByCode = useCallback(
     async (code: string) => {
       try {
@@ -980,7 +999,12 @@ export function Messenger({
       {routedPane === 'new-group' ? (
         <NewGroupPanel me={me} onBack={backToChat} onCreate={createGroup} />
       ) : routedPane === 'profile' ? (
-        <ProfilePanel me={me} onBack={backToChat} onSave={saveProfile} />
+        <ProfilePanel
+          me={me}
+          onBack={backToChat}
+          onSave={saveProfile}
+          onEmailVerified={refreshMe}
+        />
       ) : routedPane === 'settings' ? (
         <SettingsScreen
           me={me}

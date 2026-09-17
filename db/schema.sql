@@ -263,6 +263,44 @@ create unique index if not exists vx_users_email_unique
   on vx_users (lower(email))
   where email is not null;
 
+/* ── confirming an address ────────────────────────────────────────────── */
+
+-- Null until the address has been proved with a code. Every account that existed before this
+-- column did is unverified, and that is the true state rather than an accident of the
+-- migration: nothing had ever checked those addresses either.
+--
+-- A timestamp rather than a boolean, so "when" stays answerable later without another
+-- migration.
+alter table vx_users add column if not exists email_verified_at bigint;
+
+-- One code per address, doing the job vx_otp does for a phone number.
+--
+-- A separate table rather than a second kind of key on vx_otp, deliberately. That one is keyed
+-- by phone and is carrying live logins right now, and re-keying a table which already holds rows
+-- is how a working path gets broken.
+--
+-- `code_hash` is an HMAC of the code keyed by the server secret with the address mixed in, so a
+-- database leak yields no usable codes and a code observed for one address cannot be replayed
+-- against another. One row per address means there is never more than a single valid code and
+-- nothing to collect beyond the opportunistic sweep in putEmailCode().
+--
+-- Rate limiting needs no table here. vx_otp_rate buckets are arbitrary scope strings, so the
+-- email senders use "cooldown:email:", "send:email:" and the shared "send:ip:" in the table
+-- that already exists.
+--
+-- Keep the semicolon character out of these notes. This file is split on it before the
+-- statements reach Postgres, and one typed inside a comment cuts a statement in half.
+create table if not exists vx_email_codes (
+  email       text primary key,      -- lowercased, via normaliseEmail()
+  code_hash   text not null,
+  sent_at     bigint not null,
+  expires_at  bigint not null,
+  attempts    integer not null default 0,
+  consumed_at bigint,
+  sent_ip     text
+);
+create index if not exists vx_email_codes_expires on vx_email_codes (expires_at);
+
 /* ── view-once media ──────────────────────────────────────────────────── */
 
 -- A view-once photo or voice note is only view-once if the bytes cannot be fetched again.
@@ -709,6 +747,22 @@ create table if not exists vx_sms_outbox (
 
 -- Read by number and recency, which is the only way it is ever queried.
 create index if not exists vx_sms_outbox_phone on vx_sms_outbox (to_phone, created_at desc);
+
+-- The same idea for email, and reached from exactly one place: the mail module's dev-mode
+-- branch. The recorded body carries a live code, so writing a row anywhere that really sends
+-- would put plaintext codes into the database and undo the reason for hashing them.
+create table if not exists vx_email_outbox (
+  id         bigserial primary key,
+  to_email   text    not null,
+  body       text    not null,
+  provider   text    not null,
+  ok         boolean not null default true,
+  error      text,
+  created_at bigint  not null
+);
+
+-- Read by address and recency, which is the only way it is ever queried.
+create index if not exists vx_email_outbox_email on vx_email_outbox (to_email, created_at desc);
 
 /* ── deleting an account ───────────────────────────────────────────────── */
 

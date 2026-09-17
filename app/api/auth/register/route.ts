@@ -21,6 +21,7 @@ import {
   usernameTaken,
 } from '@/lib/db';
 import { normaliseEmail } from '@/lib/email';
+import { startEmailCode } from '@/lib/email-code';
 import { GOOGLE_TICKET_COOKIE, verifyGoogleTicket } from '@/lib/google';
 import { rand, newId } from '@/lib/ids';
 import { formatPhone, normalisePhone } from '@/lib/phone';
@@ -134,6 +135,10 @@ export async function POST(req: Request) {
       username: wanted,
       phone,
       email,
+      // Unproved at this point by definition: the code is sent after the account exists, because
+      // registration must not depend on the mail arriving. A send that fails leaves this null and
+      // the address can still be confirmed later from Settings.
+      emailVerifiedAt: null,
       // A username someone chose is the friendliest thing to show next to their messages; a
       // generated handle is not, so that case falls back to the number instead.
       displayName:
@@ -200,6 +205,30 @@ export async function POST(req: Request) {
       ip: clientIp(req),
     });
     await setSessionCookie(user.id, device.id);
+
+    /**
+     * A confirmation code goes out best-effort, after the account exists and after the session
+     * is set.
+     *
+     * Deliberately not fatal, and that is the point. Signup has already succeeded — the account
+     * is real and usable — so a mail provider that is down, unconfigured, or refusing an
+     * unverified sending domain must not turn a successful registration into a failed one. The
+     * address simply stays unconfirmed and can be confirmed later from Settings, where the
+     * resend lives.
+     *
+     * It is awaited rather than fired and forgotten so the code row is written before the
+     * response lands, which means an immediate resend meets the cooldown instead of racing it.
+     * The failure is logged and nothing else: the caller is told the signup worked, because it
+     * did.
+     */
+    if (email) {
+      const sent = await startEmailCode(email, clientIp(req)).catch(() => null);
+      if (!sent || !sent.ok) {
+        console.error(
+          '[varnox] signup confirmation code was not sent; the address can be confirmed later'
+        );
+      }
+    }
 
     return ok({ user: publicUser(user) }, 201);
   });
