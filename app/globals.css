@@ -33,6 +33,11 @@
      Both are theme tokens, because the pale theme needs a deeper gold against cream. */
   --gold-bright: #facc15;
   --gold-tint: rgba(250, 204, 21, 0.12);
+  /* The featured card's two extras, both from the reference's tier card: an outline far
+     stronger than --line (it is the thing announcing itself) and a glow soft enough to
+     read as light rather than as a border. */
+  --gold-edge: rgba(250, 204, 21, 0.7);
+  --gold-glow: rgba(250, 204, 21, 0.08);
   /* Headings only. The reference sets its titles in an italic serif, and that is most of
      its character — but only its titles. The body stays on the sans stack: a chat list is
      small text, and a serif at 13px is measurably harder to read at that size. */
@@ -94,6 +99,14 @@ html[data-theme='light'] {
      the lightness a cream surface needs: #22c55e on cream is about 2.3:1, and this is
      5.3:1. Same hue, same reasoning as the gold ramp at this end. */
   --value: #157a3a;
+  /* The same two devices on cream. The outline is the pale gold rather than the dark one, and
+     it sits at a lower alpha because a gold edge on cream reads louder than on near-black. */
+  --gold-edge: rgba(158, 118, 28, 0.55);
+  --gold-glow: rgba(158, 118, 28, 0.07);
+  /* The ink that goes on the gold. The dark theme's gold is bright, so its ink is dark; this
+     theme's gold is deep, so its ink has to be light or every badge, avatar and call button
+     set on --brand carries #422006 on #8a6410 — about 2.7:1, which is not readable. */
+  --on-brand: #fffdf7;
 }
 
 html[data-theme='dark'] {
@@ -1578,41 +1591,89 @@ html[data-theme='dark'] .tag {
 }
 .settings-head h2 {
   margin: 0;
-  font-size: 18px;
-  font-weight: 500;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 19px;
+  font-weight: 600;
+  /* No colour of its own. It inherits --header-text, which is already the right gold for this
+     bar in each theme — the pale theme's header is a dark brown, so the deep --gold-bright
+     that suits a cream surface is the wrong one here, at about 2.9:1. */
 }
 .settings-body {
   flex: 1;
   overflow-y: auto;
   padding-bottom: 30px;
 }
+/* The featured card: the outline and glow the reference reserves for the tier it wants read
+   as the premium one. It is the only card on this screen that gets them. */
 .settings-profile {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 18px;
-  padding: 22px 22px;
-  background: var(--panel);
+  margin: 16px 14px 4px;
+  padding: 20px;
+  border: 1px solid var(--gold-edge);
+  border-radius: 16px;
+  background: var(--panel-2);
+  box-shadow: 0 0 20px var(--gold-glow);
 }
+/* The text column has to be allowed to shrink, or a long unbroken display name pushes the
+   card wider instead of wrapping: a flex item defaults to min-width auto. The badge is
+   excluded because it is positioned and has no column of its own. */
+.settings-profile > span:not(.premium-badge) {
+  min-width: 0;
+}
+.settings-profile .nm,
+.settings-profile .ab {
+  overflow-wrap: anywhere;
+}
+/* The card's title, in the reference's serif italic — the same face its tier names and its
+   price are set in. */
 .settings-profile .nm {
-  font-size: 20px;
-  font-weight: 500;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 21px;
+  font-weight: 600;
 }
 .settings-profile .ab {
   color: var(--muted);
   font-size: 13.6px;
   margin-top: 2px;
 }
+/* Groups become cards, the way the reference separates its tiers: a hairline outline over a
+   surface a shade above the page, rather than headings floating on the background. */
 .settings-group {
-  padding: 6px 0 14px;
+  margin: 10px 14px 12px;
+  padding: 4px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel-2);
 }
+/* The reference's section label, kept as the only place its all-caps gold appears. It is set
+   at 11px rather than the reference's 0.52rem — about 8px — which is legible on a monitor and
+   not on a phone. */
 .settings-group .label {
-  padding: 12px 22px 6px;
-  color: var(--brand-strong);
-  font-size: 13.4px;
-  font-weight: 600;
-}
-html[data-theme='dark'] .settings-group .label {
+  padding: 14px 22px 4px;
   color: var(--gold-bright);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+/* The tier pill, straight from the reference: solid gold, its inverse ink, and small caps. */
+.premium-badge {
+  position: absolute;
+  top: -9px;
+  right: 14px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--brand);
+  color: var(--badge-text);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 .settings-row {
   display: flex;

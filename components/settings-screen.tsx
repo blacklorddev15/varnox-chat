@@ -140,6 +140,10 @@ export function SettingsScreen({
                 <div className="ab">{formatPhone(me.phone) || `@${me.username}`}</div>
                 <div className="ab">{me.about || 'Hey there! I am using Varnox.'}</div>
               </span>
+              {/* Purely cosmetic, and deliberately so: this screen has no tier behind it, so
+                  the pill is a label on the card rather than a claim the account can check
+                  against anything. Wire it to a real field before it means something. */}
+              <span className="premium-badge">Premium</span>
             </button>
 
             <div className="settings-group">
