@@ -493,6 +493,89 @@ A token is proved by hashing the presented value and comparing in constant time,
 is useless as a credential — presenting it is refused like anything else. Revoking takes effect on
 the next request, since verification only accepts a token row whose `revoked_at` is null.
 
+### Running a bot: START, the inbox, and replies
+
+A bot's process **polls Varnox**. Nothing is pushed to it, and it needs no inbound port — which is
+what makes this work on a Pterodactyl container, behind NAT, or anywhere else that cannot accept a
+connection from outside.
+
+| Step | Endpoint | Auth |
+|---|---|---|
+| The user presses **Start** | `POST /api/bots/[id]/start` | session cookie |
+| The user says something | `POST /api/bots/[id]/messages` | session cookie |
+| The user reads the thread | `GET /api/bots/[id]/messages` | session cookie |
+| The bot takes work | `GET /api/v1/inbox?wait=25` | **bot token** |
+| The bot answers | `POST /api/v1/inbox/[id]/reply` | **bot token** |
+| The bot reads context | `GET /api/v1/thread` | **bot token** |
+
+**Start** opens the conversation and queues `/start` — the same convention Telegram uses, so a bot
+written for Telegram ports without changes. It is idempotent: pressing it again opens the thread and
+does not greet the bot a second time.
+
+A worker that does all of it:
+
+```js
+// worker.js — put VARNOX_BOT_TOKEN in the panel's startup variables
+const TOKEN = process.env.VARNOX_BOT_TOKEN;
+const API = (process.env.VARNOX_URL || 'https://varnox-chat.vercel.app') + '/api/v1';
+const auth = { Authorization: `Bearer ${TOKEN}` };
+
+async function call(url, init) {
+  const res = await fetch(url, init);
+  const body = await res.json().catch(() => ({}));
+  if (res.status === 429) throw new Error('rate limited — back off: ' + body.error);
+  if (!res.ok && res.status !== 409) throw new Error(`${res.status} ${body.error || ''}`);
+  return body;
+}
+
+for (;;) {
+  try {
+    // Long poll: returns as soon as a message arrives, or after 25s.
+    const { messages } = await call(`${API}/inbox?wait=25`, { headers: auth });
+    for (const m of messages) {
+      const body = m.body.trim() === '/start' ? 'Hello! Send me anything.' : `You said: ${m.body}`;
+      await call(`${API}/inbox/${m.id}/reply`, {
+        method: 'POST',
+        headers: { ...auth, 'content-type': 'application/json' },
+        body: JSON.stringify({ body }),
+      });
+    }
+  } catch (err) {
+    console.error('[varnox]', err.message);
+    await new Promise((r) => setTimeout(r, 5000));   // and let a 401 be fatal if you prefer
+  }
+}
+```
+
+#### Claiming, which is the part that matters
+
+`GET /api/v1/inbox` does not merely read — it **claims**. The messages it returns are moved out of
+`pending` in the same statement that selects them, so the same message is never handed to two
+pollers. Without that, a container that restarted, or two replicas behind a load balancer, would
+each answer every message and the user would get each reply twice.
+
+The claim **expires after five minutes**. A bot that died between claiming and replying would
+otherwise hold the message forever; instead it becomes claimable again and the crash costs a delay
+rather than the message.
+
+**Claim before you reply.** `POST /api/v1/inbox/[id]/reply` only accepts a message this bot has
+claimed; anything else is a 409. That is what keeps the claim meaningful — a bot cannot answer a
+message it never took, which is the case that would let two pollers both reply.
+
+The long poll is an optimisation, not a mechanism: if the platform kills a request at its function
+limit, the client simply polls again and is slower, not wrong. `wait` is capped at 25 seconds.
+
+#### What a token cannot do
+
+- **Only its own owner's data.** Every query behind the API is scoped by the token's owner, and the
+  inbox is scoped by bot id as well, so one bot cannot take another bot's queue even on the same
+  account.
+- **Only conversations that were started.** A bot with no thread has no inbox, because START is the
+  point at which a conversation begins.
+- **No public discovery.** All three screens operate on bots you own. There is no directory of other
+  people's bots, no groups, and no way to message somebody else's bot — those are separate features
+  with their own moderation questions, and none of them is built.
+
 ### Known gaps
 
 - **No re-issue route.** Revoking is terminal for a bot: one bot, one token, issued at creation.

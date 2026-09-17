@@ -587,3 +587,42 @@ export type CreatedBot = {
   /** Shown once. Only the hash was stored, so this value cannot be recovered later. */
   token: string;
 };
+
+/**
+ * A message in a conversation between an account and one of its bots.
+ *
+ * `direction` rather than two types, because a reader almost always wants both interleaved — the
+ * thread view draws them in order and the bot's context is "the last N, either way".
+ *
+ * There is no `status` here. That field exists for the bot's inbox, and it is the bot's business
+ * rather than the reader's: whether a message has been claimed yet is not something the person who
+ * typed it should ever be shown. The Bots screen shows `pending` on the thread, which is the
+ * question a person actually has — has my bot answered?
+ */
+export type BotMessageDirection = 'in' | 'out';
+
+export type BotMessage = {
+  id: string;
+  direction: BotMessageDirection;
+  body: string;
+  createdAt: number;
+};
+
+/**
+ * A conversation with a bot, as the list shows it.
+ *
+ * The last-message fields are null for a thread that exists but has nothing in it — which is a real
+ * state, not a missing one: START creates the thread and queues `/start`, and if the bot's process
+ * is not running yet there will be a thread with no reply. Distinguishing that from "no thread"
+ * is what lets the screen say "started, waiting" instead of looking like START did nothing.
+ */
+export type BotThread = {
+  botId: string;
+  createdAt: number;
+  updatedAt: number;
+  lastBody: string | null;
+  lastDirection: BotMessageDirection | null;
+  lastAt: number | null;
+  /** Messages from the account that the bot has not answered yet. */
+  pending: number;
+};

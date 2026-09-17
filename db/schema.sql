@@ -962,3 +962,77 @@ create index if not exists vx_bot_tokens_bot on vx_bot_tokens (bot_id);
 
 -- Deleting a bot has to find its tokens, and the operator view lists tokens by owner.
 create index if not exists vx_bot_tokens_user on vx_bot_tokens (user_id, created_at desc);
+
+/* ── bot conversations ────────────────────────────────────────────────────── */
+
+-- A conversation between an account and one of its own bots, opened when the user presses START.
+--
+-- One row per bot, not one per conversation: a bot here belongs to the account that created it and
+-- talks only to that account, so there is nothing for a second thread to be about. The primary key
+-- is the bot id, which is what makes START idempotent — pressing it twice is an insert that does
+-- nothing rather than a second empty conversation.
+--
+-- The thread exists separately from its messages so that a bot which has been started but has not
+-- answered yet still appears in the list. Without this row, START would be invisible until the bot
+-- said something, and a bot whose process is down would look like a bot that was never started.
+--
+-- Keep the semicolon character out of these notes, for the reason given at the top of this file.
+create table if not exists vx_bot_threads (
+  bot_id     text primary key,
+  user_id    text not null,
+  created_at bigint not null,
+  updated_at bigint not null
+);
+
+-- The list is "the threads this account started, most recently active first". `updated_at` is
+-- touched by every message in either direction, so the order follows the conversation rather than
+-- when it was opened.
+create index if not exists vx_bot_threads_user on vx_bot_threads (user_id, updated_at desc);
+
+-- Every message in every bot conversation, both directions, in one table.
+--
+-- One table rather than two because the two directions share a shape and a reader almost always
+-- wants both: the thread view interleaves them, and the bot's context is "the last N, either way".
+-- The `direction` column is what tells them apart, and it is also what the claim index is partial
+-- on — only inbound rows are work for the bot.
+--
+-- For 'in' rows, `status` is the queue state and mirrors varnox_bot_inbound exactly: pending until
+-- a poller claims it, then claimed while the bot considers it, then acted once a reply has been
+-- written. `claimed_at` is what stops two pollers taking the same message — the claim is an UPDATE
+-- whose WHERE clause includes the state it is leaving, so the loser of a race updates nothing and
+-- gets no row back. `error` records why a claimed message never got an answer, so a stuck one is
+-- visible rather than silently pending forever.
+--
+-- 'out' rows carry status 'done' and no claim fields. They are never work for anybody.
+--
+-- Keep the semicolon character out of these notes.
+-- `seq` exists to put messages in order, and it is not a duplicate of `created_at`. That column is
+-- a millisecond stamp, and two messages genuinely can share one — a person sending two lines in a
+-- hurry, or a bot answering a batch after a claim, both do it. Ordering by a stamp that ties leaves
+-- the tie broken by the primary key, which is random, so a conversation could render out of order
+-- about as often as the clock ties. A sequence has no ties by construction, so the order of the
+-- rows is the order they were written, which is the only order a conversation can mean.
+--
+-- Keep the semicolon character out of these notes.
+create table if not exists vx_bot_messages (
+  seq        bigserial,
+  id         text primary key,
+  bot_id     text not null,
+  user_id    text not null,
+  direction  text not null,
+  body       text not null,
+  status     text not null default 'pending',
+  error      text,
+  claimed_at bigint,
+  acted_at   bigint,
+  created_at bigint not null
+);
+
+-- The thread view reads one bot's messages oldest-to-newest.
+create index if not exists vx_bot_messages_thread on vx_bot_messages (bot_id, seq);
+
+-- The inbox claim: the oldest pending inbound row. Partial, so outbound rows and already-claimed
+-- ones are not in the index at all — the query only ever wants the pending ones, and a partial
+-- index stays small no matter how long the conversation gets.
+create index if not exists vx_bot_messages_claim
+  on vx_bot_messages (status, seq) where direction = 'in';

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import type { Bot, CreatedBot, PublicUser } from '@/lib/types';
+import type { Bot, BotThread, CreatedBot, PublicUser } from '@/lib/types';
 import { api, del as remove, post } from '@/lib/client';
 import { dateStamp, relativeTime } from '@/lib/format';
 import { describeHandleProblem, suggestHandle } from '@/lib/bot-handle';
@@ -26,9 +26,11 @@ import {
  * A module-level function rather than a hook, so both the mount effect and the refresh path call
  * the same request without either having to know about the other's state.
  */
-async function fetchBots(): Promise<Bot[]> {
-  const res = await api<{ bots: Bot[] }>('/api/bots');
-  return res.bots;
+async function fetchBots(): Promise<{ bots: Bot[]; threads: Record<string, BotThread> }> {
+  const res = await api<{ bots: Bot[]; threads: BotThread[] }>('/api/bots');
+  const threads: Record<string, BotThread> = {};
+  for (const thread of res.threads) threads[thread.botId] = thread;
+  return { bots: res.bots, threads };
 }
 
 /**
@@ -68,6 +70,8 @@ export function BotsScreen({
   telegram: { configured: boolean; setupMessage: string | null };
 }) {
   const [bots, setBots] = useState<Bot[]>([]);
+  /** Started conversations, by bot id. Empty means none of them have been started. */
+  const [threads, setThreads] = useState<Record<string, BotThread>>({});
   /**
    * Starts true, because the first render genuinely is a load: the list comes from the effect
    * below rather than from a prop. Turning it on at the top of `load()` instead would be a
@@ -126,7 +130,9 @@ export function BotsScreen({
    */
   const refresh = useCallback(async () => {
     try {
-      setBots(await fetchBots());
+      const data = await fetchBots();
+      setBots(data.bots);
+      setThreads(data.threads);
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load your bots.');
@@ -152,9 +158,10 @@ export function BotsScreen({
     let cancelled = false;
     void (async () => {
       try {
-        const list = await fetchBots();
+        const data = await fetchBots();
         if (cancelled) return;
-        setBots(list);
+        setBots(data.bots);
+        setThreads(data.threads);
         setError('');
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load your bots.');
@@ -323,6 +330,11 @@ export function BotsScreen({
       await remove(`/api/bots/${id}`);
       setBots((prev) => prev.filter((b) => b.id !== id));
       setConfirming(null);
+      setThreads((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       setTokens((prev) => {
         const next = { ...prev };
         delete next[id];
@@ -588,6 +600,16 @@ export function BotsScreen({
                       </span>
                     </div>
                     {bot.description ? <p className="bots-desc">{bot.description}</p> : null}
+                    {threads[bot.id] ? (
+                      <div className="bots-badges">
+                        <span className="bots-badge">Started</span>
+                        {threads[bot.id].pending > 0 ? (
+                          <span className="bots-badge on">
+                            {threads[bot.id].pending} waiting for the bot
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <p className="bots-meta">
                       Created {dateStamp(bot.createdAt)}
                       {bot.telegramCheckedAt
@@ -658,6 +680,14 @@ export function BotsScreen({
                   </div>
                 ) : (
                   <div className="bots-actions">
+                    {/*
+                      One tap from the search results to the conversation, which is the flow people
+                      expect from a bot: find it by username, press Start. The label follows whether
+                      the thread exists, so it says what the button will actually do.
+                    */}
+                    <Link href={`/bots/${bot.id}`} className="btn">
+                      <IconBot size={16} /> {threads[bot.id] ? 'Open chat' : 'Start'}
+                    </Link>
                     <button
                       type="button"
                       className="btn ghost"

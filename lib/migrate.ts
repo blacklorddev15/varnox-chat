@@ -583,6 +583,59 @@ export const STEPS: Step[] = [
     label: 'vx_bot_tokens_user',
     sql: `create index if not exists vx_bot_tokens_user on vx_bot_tokens (user_id, created_at desc)`,
   },
+  // Bot conversations. The same claim shape as varnox_bot_inbound: a status a poller moves, a
+  // claimed_at that decides the race, and a partial index sized for the pending rows only.
+  {
+    kind: 'table',
+    label: 'vx_bot_threads',
+    sql: `create table if not exists vx_bot_threads (
+            bot_id     text primary key,
+            user_id    text not null,
+            created_at bigint not null,
+            updated_at bigint not null
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_bot_threads_user',
+    sql: `create index if not exists vx_bot_threads_user on vx_bot_threads (user_id, updated_at desc)`,
+  },
+  {
+    kind: 'table',
+    label: 'vx_bot_messages',
+    sql: `create table if not exists vx_bot_messages (
+            seq        bigserial,
+            id         text primary key,
+            bot_id     text not null,
+            user_id    text not null,
+            direction  text not null,
+            body       text not null,
+            status     text not null default 'pending',
+            error      text,
+            claimed_at bigint,
+            acted_at   bigint,
+            created_at bigint not null
+          )`,
+  },
+  {
+    // The ordering column, for a database that already has this table without it. `add column ...
+    // bigserial` creates the sequence and numbers the existing rows, so an upgrade produces the
+    // same shape as a fresh install.
+    kind: 'column',
+    label: 'vx_bot_messages.seq',
+    sql: `alter table vx_bot_messages add column if not exists seq bigserial`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_bot_messages_thread',
+    sql: `create index if not exists vx_bot_messages_thread on vx_bot_messages (bot_id, seq)`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_bot_messages_claim',
+    sql: `create index if not exists vx_bot_messages_claim
+            on vx_bot_messages (status, seq) where direction = 'in'`,
+  },
 ];
 
 /** A request waits this long for reconciliation, then carries on without it. */

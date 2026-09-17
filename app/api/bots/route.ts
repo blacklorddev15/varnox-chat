@@ -1,6 +1,7 @@
 import { requireUser } from '@/lib/auth';
 import { bad, handle, ok, readJsonBody } from '@/lib/api';
 import { botRateMessage, botRateSlot, createBot, handleTaken, listBots } from '@/lib/bots';
+import { listBotThreads } from '@/lib/bot-chat';
 import { BOT_HANDLE_HINT, BOT_HANDLE_MAX, BOT_HANDLE_MIN, BOT_HANDLE_PATTERN } from '@/lib/bot-handle';
 import { TELEGRAM_BOT_TOKEN_PATTERN } from '@/lib/bots-token';
 import { secretKeyAvailable } from '@/lib/secretbox';
@@ -70,11 +71,20 @@ const CreateSchema = {
   ),
 };
 
-/** This account's bots, newest first. */
+/**
+ * This account's bots, newest first, plus its bot conversations.
+ *
+ * The threads come along so the list can tell a bot that has been started from one that has not —
+ * which decides whether the row offers "Start" or "Open chat", and whether a message is waiting for
+ * an answer. Two queries instead of a join onto the Bot shape, because the bot projections are
+ * shared with the create and token-verification paths, where a thread is not in scope and a lateral
+ * join would have to be threaded through all of them to no purpose.
+ */
 export async function GET() {
   return handle(async () => {
     const me = await requireUser();
-    return ok({ bots: await listBots(me.id) });
+    const [bots, threads] = await Promise.all([listBots(me.id), listBotThreads(me.id)]);
+    return ok({ bots, threads });
   });
 }
 
