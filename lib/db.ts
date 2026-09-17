@@ -33,6 +33,7 @@ import type {
   WhatsAppPairing,
   WhatsAppSession,
 } from './types';
+import { suspensionBlocksUse, suspensionState } from './suspension';
 
 /**
  * The datastore.
@@ -3504,18 +3505,37 @@ export async function isAccountDeleted(userId: string): Promise<boolean> {
 }
 
 /**
- * Is this account suspended?
+ * Is this account blocked right now?
  *
  * The boolean form, for the one caller that only needs a yes or no: the session gate, which runs
- * on every authenticated request and has no use for the reason or the review timestamp.
+ * on every authenticated request and has no use for the reason or the dates.
+ *
+ * The answer is not "has this account ever been suspended" but "is it blocked at this moment",
+ * which is why the review timestamp is read as well. A suspension that has been appealed lifts on
+ * its own after the waiting period and drops entirely after a week, and this is where that becomes
+ * true for every request rather than a note in a screen: an account whose five hours are up is no
+ * longer refused, without anything having to run at the moment it happens.
+ *
+ * Reading only suspended_at, as this used to, meant an appeal changed nothing — an appealed account
+ * was blocked for exactly as long as an unappealed one, and the ladder existed only on paper. The
+ * columns are the same two the ban screen has always written.
+ *
  * Not cached, for the reason getSuspension gives.
  */
 export async function isAccountSuspended(userId: string): Promise<boolean> {
-  const rows = await q<{ suspended_at: number | null }>(
-    `select suspended_at from vx_users where id = $1`,
+  const rows = await q<{ suspended_at: number | null; review_requested_at: number | null }>(
+    `select suspended_at, review_requested_at from vx_users where id = $1`,
     [userId]
   );
-  return rows[0]?.suspended_at != null;
+  const row = rows[0];
+  if (!row) return false;
+
+  return suspensionBlocksUse(
+    suspensionState(
+      row.suspended_at == null ? null : Number(row.suspended_at),
+      row.review_requested_at == null ? null : Number(row.review_requested_at)
+    )
+  );
 }
 
 /**
