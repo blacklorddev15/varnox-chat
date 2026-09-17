@@ -441,6 +441,58 @@ One deliberate difference from Telegram's BotFather: it requires a bot's usernam
 Varnox handles do not — the rule is already part of the API contract and is covered by tests, so the
 conversation suggests a handle derived from the name rather than enforcing a suffix.
 
+### The token API: `/api/v1`
+
+This is the surface a **bot token** is accepted on. Everything else in the app authenticates with a
+session cookie; these endpoints take `Authorization: Bearer vx_…` instead, so an integration holds a
+credential that names a program, can be scoped, and can be withdrawn without ending anybody's
+session.
+
+| Endpoint | Does |
+|---|---|
+| `GET /api/v1/me` | Who the token is: the bot, and the account it acts for. Call this first. |
+| `GET /api/v1/numbers` | The paired numbers this token can send from. |
+| `POST /api/v1/messages` | `{"session": "web_+1555…", "body": "…"}` — queue a message as the owner. |
+
+```bash
+TOKEN=vx_…
+
+curl -s https://varnox-chat.vercel.app/api/v1/me \
+  -H "Authorization: Bearer $TOKEN"
+# {"owner":{"username":"…","displayName":"…"},
+#  "bot":{"id":"bot_…","handle":"support-bot","name":"Support bot","active":true,…}}
+
+curl -s https://varnox-chat.vercel.app/api/v1/numbers \
+  -H "Authorization: Bearer $TOKEN"
+# {"numbers":[{"id":"web_+1555…","phone":"+1555…","status":"connected","updatedAt":…}]}
+
+curl -s -X POST https://varnox-chat.vercel.app/api/v1/messages \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"session":"web_+1555…","body":"hello"}'
+# 201 {"message":{"id":42,"at":…},"note":"Queued for the paired number. …"}
+```
+
+**A token is the account.** These routes act as the token's owner, so anything they expose is
+exposed to whoever holds the token. That is what "a bot acting for its owner" has to mean — but it
+is also why the surface is built one endpoint at a time rather than by mirroring the whole app.
+`GET /api/v1/numbers` returns phone numbers in full, and a session id is `web_` plus the same
+number, so masking them would obscure without hiding.
+
+**Every refusal is the same 401**, with the same sentence, whatever went wrong — no header, a
+malformed token, a token that never existed, a revoked token, a bot the owner switched off. A
+caller that could tell those apart could probe for facts it was not given, and the legitimate
+holder has no use for the difference: the answer in every case is "check your credential", and the
+Bots screen states plainly whether a token is live. The refusal never echoes the presented value,
+so a typo cannot write a credential into the caller's logs.
+
+Metered at **120 calls per minute per bot** — per bot rather than per account, so one runaway
+integration does not spend the allowance of the account's other bots. Exceeding it answers **429**,
+not 401: the credential is fine and the caller should retry.
+
+A token is proved by hashing the presented value and comparing in constant time, so the stored hash
+is useless as a credential — presenting it is refused like anything else. Revoking takes effect on
+the next request, since verification only accepts a token row whose `revoked_at` is null.
+
 ### Known gaps
 
 - **No re-issue route.** Revoking is terminal for a bot: one bot, one token, issued at creation.

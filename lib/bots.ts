@@ -345,7 +345,7 @@ export async function recordTelegramCheck(
  * partial-match structure to walk. The timing-safe compare then re-checks the row it found, so
  * the final decision never rests on a byte-by-byte `=` in the query planner.
  */
-export async function botForToken(presented: string): Promise<Bot | null> {
+async function tokenRow(presented: string): Promise<(BotRow & { token_hash: string }) | null> {
   const rows = await q<BotRow & { token_hash: string }>(
     `select ${BOT_COLUMNS}, t.token_hash
        from vx_bot_tokens t
@@ -358,7 +358,37 @@ export async function botForToken(presented: string): Promise<Bot | null> {
   const row = rows[0];
   if (!row) return null;
   if (!botTokenMatches(presented, row.token_hash)) return null;
-  return toBot(row);
+  return row;
+}
+
+/**
+ * The bot a presented token belongs to, or null.
+ *
+ * The narrow answer, for anywhere that only needs to know whether a token is good. See
+ * authenticateBot() when the caller also has to act on somebody's behalf.
+ */
+export async function botForToken(presented: string): Promise<Bot | null> {
+  const row = await tokenRow(presented);
+  return row ? toBot(row) : null;
+}
+
+/**
+ * Who a presented token is, and who it acts for.
+ *
+ * The extra field over botForToken() is `ownerId`, and it is the whole reason this is a separate
+ * function rather than an option. Every query behind the token API is scoped by owner — the same
+ * rule as everywhere else in this file — so a caller that has authenticated a token must be
+ * holding the owner id, and the way to guarantee that is for the authentication step to be the
+ * only thing that can produce it.
+ *
+ * `user_id` deliberately does not appear in the Bot that is returned to callers; see toBot.
+ */
+export async function authenticateBot(
+  presented: string
+): Promise<{ bot: Bot; ownerId: string } | null> {
+  const row = await tokenRow(presented);
+  if (!row) return null;
+  return { bot: toBot(row), ownerId: row.user_id };
 }
 
 /**
@@ -396,6 +426,10 @@ export const BOT_LIMITS = {
   create: { windowMs: 60 * 60_000, limit: 20, what: 'bots created' },
   mutate: { windowMs: 5 * 60_000, limit: 60, what: 'changes' },
   test: { windowMs: 5 * 60_000, limit: 30, what: 'Telegram tests' },
+  // The API's own ceiling, per bot rather than per account: a runaway loop in one integration
+  // should not spend the allowance of the account's other bots, and metering per token is what
+  // makes a single misbehaving client visible instead of a mystery spike on the whole account.
+  api: { windowMs: 60_000, limit: 120, what: 'API calls' },
 } as const;
 
 export type BotAction = keyof typeof BOT_LIMITS;
