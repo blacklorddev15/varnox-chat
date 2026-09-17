@@ -12,7 +12,7 @@ import type {
 import { post } from '@/lib/client';
 import { formatPhone } from '@/lib/phone';
 import { Avatar } from './avatar';
-import { IconBack, IconBell, IconBlock, IconChat, IconLink, IconLock, IconPalette, IconStar, IconTrash, IconUser, IconWhatsApp } from './icons';
+import { IconBack, IconBell, IconBlock, IconBot, IconChat, IconLink, IconLock, IconPalette, IconStar, IconTrash, IconUser, IconWhatsApp } from './icons';
 
 const WALLS: { id: WallpaperId; label: string }[] = [
   { id: 'doodle', label: 'Doodle' },
@@ -182,6 +182,27 @@ export function SettingsScreen({
                   <small>Pair a WhatsApp number with the bot that answers for it</small>
                 </span>
               </button>
+              {/* A second way in, beside the menu entry and the phone tab. Bots is a page of its
+                  own rather than a panel, so this is a Link — the same arrangement the Admin
+                  control row below uses. */}
+              <Link href="/bots" className="settings-row">
+                <span className="ic">
+                  <IconBot />
+                </span>
+                <span className="txt">
+                  Bots
+                  <small>Telegram bots you own, and their Varnox API tokens</small>
+                </span>
+              </Link>
+              <Link href="/bots/father" className="settings-row">
+                <span className="ic">
+                  <IconBot />
+                </span>
+                <span className="txt">
+                  BotFather
+                  <small>Create and manage bots by talking to it</small>
+                </span>
+              </Link>
             </div>
 
             <div className="settings-group">

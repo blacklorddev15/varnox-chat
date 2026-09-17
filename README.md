@@ -309,3 +309,144 @@ to edit or delete an entry.
   multi-device linking, and contact/address-book sync.
 - **Search is bounded** — it scans the most recent messages of your 12 most recent chats rather
   than every message ever sent.
+
+---
+
+## Bots
+
+Accounts manage the bots they own from `/bots`, reached from the sidebar menu, the phone tab bar,
+and a row in Settings.
+
+### Architecture, and the one thing it cannot do
+
+`varnox-chat` is the frontend and the application backend. A **separate, self-hosted Telegram Bot
+API server** (`telegram-bot-api`) is what Varnox talks to over HTTP, through the server-side
+`TELEGRAM_BOT_API_URL`. None of that C++ server is vendored into this app.
+
+**Varnox cannot create a Telegram bot or reserve a Telegram username.** There is no such method in
+the Bot API — bot tokens are issued only by @BotFather inside Telegram. So the wizard's username
+step is a **Varnox handle** (unique across the app), and the Telegram token is a separate, optional
+field that has to be pasted in from @BotFather. The two are distinct everywhere: `handle` versus
+`telegramUsername`.
+
+### The create wizard
+
+Three steps, then the token:
+
+1. **Bot name** — free text.
+2. **Username** — a Varnox handle, pre-suggested from the name and editable. Lowercase letters,
+   digits, `-` and `_`, 3–32 characters, starting and ending alphanumeric. Uniqueness is global, on
+   `lower(handle)`. A capitalised entry is folded, not rejected.
+3. **Telegram token, description, active** — all optional. The token is sealed before storage.
+
+On success the plaintext Varnox API token is shown **once**, with a copy button. Only its SHA-256
+hash is stored, so it cannot be shown again — losing it means deleting the bot and recreating it.
+
+### The two secrets
+
+| | Stored as | Why |
+|---|---|---|
+| Varnox API token | SHA-256 hash only | Nothing ever needs to read it back. A plain hash rather than scrypt, because 256 random bits have no guessing space for a work factor to slow down, while verification happens on every call. |
+| Telegram bot token | AES-256-GCM sealed | Telegram has to be shown the original, so it cannot be hashed. The key is HKDF-derived from `TELEGRAM_TOKEN_KEY`, falling back to `SESSION_SECRET`. |
+
+No list or detail projection selects either secret. The bot projections take
+`(telegram_secret is not null) as has_telegram` — a boolean that answers "is one on file" without
+the column ever crossing the wire from Postgres.
+
+Rotating the key makes stored Telegram tokens unreadable. That is not silent: the test action
+answers 409 and says to save the token again.
+
+### Environment
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `TELEGRAM_BOT_API_URL` | for the Telegram test | The bot API server's address. With it unset the screen shows a setup banner and the test answers 503 — there is no hardcoded fallback, because a default would point a fork at a server it did not choose. |
+| `TELEGRAM_TOKEN_KEY` | recommended | Key for sealing Telegram tokens. Falls back to `SESSION_SECRET`. |
+
+### Routes
+
+| Route | Purpose |
+|---|---|
+| `GET /api/bots` | This account's bots, newest first. |
+| `POST /api/bots` | Create a bot; returns the plaintext token exactly once. |
+| `GET /api/bots/[id]` | One bot. |
+| `DELETE /api/bots/[id]` | Delete a bot and its tokens. |
+| `POST /api/bots/[id]/revoke-token` | Withdraw the live token. |
+| `POST /api/bots/[id]/telegram/test` | `getMe` against the bot API server. |
+
+These are distinct from `/api/bot` (singular) next door, which is the message bridge to the
+operator's WhatsApp bot. The two share a namespace and nothing else.
+
+Every route goes through `requireUser()`, every query is scoped by `user_id`, and another account's
+bot id reads as **404, not 403** — a distinct "exists but not yours" would let ids be enumerated.
+Handles are the single exception to owner-scoping: `handleTaken()` is global by definition, and
+returns only a boolean.
+
+### Migrations
+
+`vx_bots` and `vx_bot_tokens` are additive, so `npm run db:apply` is safe to re-run on a live
+database and `ensureSchema()` reconciles them on the first request. The `handle` column is added
+with `alter table … add column if not exists` **before** its index, because `create table if not
+exists` is a no-op on a database that already has the table — without that ordering, a fresh
+database would work and an existing one would fail with `column "handle" does not exist`. The index
+is partial (`where handle is not null`) so rows written before the column existed do not collide.
+
+### Tests
+
+`npm test` runs Vitest. `tests/bots-token.test.ts`, `tests/bot-handle.test.ts`,
+`tests/validate.test.ts`, `tests/secretbox.test.ts` and `tests/telegram.test.ts` are pure and always
+run. `tests/bots-db.test.ts` needs `DATABASE_URL` and skips without it; it reconciles the schema
+itself, so an empty database is enough. It covers authorization isolation between two real
+accounts, revocation, handles, sealed-at-rest storage, and the token never leaking into any
+`getMe` failure path.
+
+### Linting
+
+`npm run lint` runs **oxlint**, not ESLint. ESLint's Next.js config bundles `typescript-eslint`,
+which refuses to load against this project's TypeScript 7 compiler, and the npm override needed for
+the documented side-by-side TypeScript 6 arrangement does not take effect because TypeScript is
+hoisted. oxlint parses TypeScript natively and needs no TypeScript API. `.oxlintrc.json` turns off
+rules whose premise does not hold here (`react-in-jsx-scope` under the automatic runtime, the
+`react-perf` category) and records the pre-existing findings in untouched components as warnings, so
+the script exits 0 and stays useful as a signal for new code.
+
+### BotFather, in the app
+
+`/bots/father` is a conversation, not a form. Telegram's BotFather is a bot you talk to, and this is
+the same idea pointed at Varnox's own bots:
+
+| Command | What it does |
+|---|---|
+| `/newbot` | Walks through bot name, then username, then an optional Telegram token, then hands over the Varnox API token. |
+| `/mybots` | Lists the account's bots as buttons. Choosing one shows its state with Test Telegram, Revoke and Delete. |
+| `/deletebot` | Same list, then a confirmation before anything is removed. |
+| `/cancel` | Abandons whatever step the conversation is on. |
+| `/help` | The command list again. |
+
+Reached from the sidebar menu, the settings row, and a button on the Bots screen. The same commands
+are also available as chips above the composer, so they can be found without knowing them.
+
+**It is a conversation and nothing else.** Every action goes through the same `/api/bots` routes the
+Bots screen uses, which do the auth, validation, rate limiting and minting. There is no second
+implementation of any of that — the command you type becomes a request, and the reply is whatever
+the server said. Conversation state lives in React state: no localStorage, no mock data.
+
+**Why this replaced the idea of a Telegram-side BotFather.** The signed-in session is the account
+link. A bot in Telegram would let anyone press START and would need its own account-linking step to
+avoid being a public credential factory. Here, only somebody already signed in to the account can
+load the page, so the minting path is unreachable to anyone who does not own the account it mints
+for.
+
+One deliberate difference from Telegram's BotFather: it requires a bot's username to end in `bot`.
+Varnox handles do not — the rule is already part of the API contract and is covered by tests, so the
+conversation suggests a handle derived from the name rather than enforcing a suffix.
+
+### Known gaps
+
+- **No re-issue route.** Revoking is terminal for a bot: one bot, one token, issued at creation.
+  Two ways to obtain a credential would mean two places to get "show it once" wrong.
+- **`botForToken()` has no route yet.** It is the verification entry point a bot-authenticated API
+  would use — built and tested, including that it fails closed for a revoked token and an inactive
+  bot — but nothing currently consumes a Varnox bot token over HTTP.
+- **Never verified against a live Telegram server.** `getMe` is exercised against stubbed
+  responses, so the request shape is covered but not a real round trip.

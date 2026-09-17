@@ -1895,7 +1895,11 @@ html[data-theme='dark'] .switch-line button {
   padding: 6px;
   z-index: 20;
 }
-.menu button {
+/* Links as well as buttons: the Bots entry navigates to its own route instead of opening a
+   panel, so it is an <a> and would otherwise lose the whole row's styling. `color` and
+   `text-decoration` are named because a link does not inherit either the way a button does. */
+.menu button,
+.menu a {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1905,8 +1909,10 @@ html[data-theme='dark'] .switch-line button {
   text-align: left;
   color: var(--text);
   font-size: 14.6px;
+  text-decoration: none;
 }
-.menu button:hover {
+.menu button:hover,
+.menu a:hover {
   background: var(--hover);
 }
 .menu .sep {
@@ -3300,4 +3306,526 @@ html[data-theme='dark'] .bubble.tail-out {
   margin: 0 0 6px;
   font-size: 13px;
   color: var(--brand);
+}
+
+/* ==========================================================================
+   bots
+
+   The Bots page is a full route rather than a panel inside /chat, so it owns its
+   own scroll container instead of borrowing the sidebar's. Everything else is the
+   existing language: an outlined card, an italic-serif title, outlined buttons and
+   the faint gold wash for state — see "the gold language" above. Nothing here
+   introduces a colour, a radius or a shadow that is not already a token.
+   ========================================================================== */
+
+.bots-wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 18px 72px;
+  min-height: 100dvh;
+}
+
+.bots-head {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.bots-head > div {
+  flex: 1;
+  min-width: 0;
+}
+.bots-title {
+  margin: 0 0 5px;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--gold-bright);
+}
+.bots-head .hint {
+  margin: 0;
+}
+.bots-head .btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+/* Always drawn, unlike .back-btn — that one is hidden on a wide screen because the chat pane has
+   its own way back, whereas this page is reached from the menu and needs a way out at every
+   width. */
+.bots-back {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+}
+.bots-back:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* A missing TELEGRAM_BOT_API_URL. Deliberately a banner and not a toast: it is a state the
+   operator has to act on outside the app, so it stays until the variable is set. */
+.bots-setup {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: var(--brand-soft);
+  border: 1px solid color-mix(in srgb, var(--brand) 40%, transparent);
+}
+.bots-setup .ic {
+  flex: none;
+  display: inline-flex;
+  margin-top: 2px;
+  color: var(--brand);
+}
+.bots-setup b {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 14.5px;
+}
+.bots-setup p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.bots-alert {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  font-size: 13.4px;
+  line-height: 1.55;
+}
+
+/* The outlined card, same as .admin-section's rows and the sheets. */
+.bots-card {
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: var(--panel);
+}
+
+.bots-form {
+  padding: 18px 18px 16px;
+  margin-bottom: 18px;
+}
+.bots-form-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.bots-field {
+  margin-bottom: 14px;
+}
+.bots-field > label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--brand-strong);
+}
+html[data-theme='dark'] .bots-field > label {
+  color: var(--gold-bright);
+}
+.bots-field .input {
+  display: block;
+}
+.bots-field textarea.input {
+  resize: vertical;
+  min-height: 76px;
+  font-family: inherit;
+}
+.bots-field small.hint {
+  display: block;
+  margin-top: 6px;
+}
+.bots-optional {
+  font-weight: 400;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.bots-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.bots-toggle-row small.hint {
+  margin-top: 3px;
+}
+
+/* The sidebar's rounded search box, widened to the page: .search-box carries flex:1 for a flex
+   row, which does nothing here, so the width is set outright. */
+.bots-search {
+  flex: none;
+  width: 100%;
+  margin: 0 0 16px;
+}
+
+.bots-status {
+  margin: 0;
+  padding: 26px 4px;
+  text-align: center;
+  font-size: 13.6px;
+  color: var(--muted);
+}
+
+.bots-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 44px 22px;
+  text-align: center;
+  border: 1px dashed var(--line-strong);
+  border-radius: 16px;
+  color: var(--muted);
+}
+.bots-empty b {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text);
+}
+.bots-empty p {
+  margin: 0;
+  max-width: 46ch;
+}
+.bots-empty .btn {
+  margin-top: 8px;
+}
+
+.bots-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.bots-row {
+  padding: 16px 18px;
+}
+.bots-row-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+}
+/* An outlined square with a gold glyph, matching .attach-ic. */
+.bots-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid var(--brand);
+  color: var(--brand);
+}
+.bots-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.bots-name {
+  display: block;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.bots-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+}
+/* The gold wash, as .tag and .chip use it. */
+.bots-badge {
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--gold-tint);
+  border: 1px solid var(--line-strong);
+  color: var(--gold-bright);
+}
+/* Stated but not celebrated: "Inactive", "No token" and "Token revoked" are facts to be read
+   rather than states to be highlighted, so they drop the wash and keep the outline. */
+.bots-badge.off {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--muted);
+}
+.bots-desc {
+  margin: 9px 0 0;
+  font-size: 13.4px;
+  line-height: 1.55;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.bots-meta {
+  margin: 8px 0 0;
+  font-size: 12.4px;
+  color: var(--muted);
+}
+
+.bots-reveal {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--gold-tint);
+  border: 1px solid var(--line-strong);
+}
+.bots-reveal b {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13.4px;
+  color: var(--gold-bright);
+}
+.bots-reveal .hint {
+  margin: 10px 0 0;
+}
+/* Monospace, wrapping rather than scrolling, and selectable in one gesture: this is the only
+   copy of the value, so it must be easy to take by hand when the clipboard is unavailable. */
+.bots-token {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.8px;
+  word-break: break-all;
+  user-select: all;
+}
+
+.bots-test {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 12px 0 0;
+}
+.bots-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.bots-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  font-size: 13.4px;
+}
+
+/* The tab bar's Bots entry is a Link, not a button, so it needs the button rules. */
+.tab-bar a {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 7px 0 5px;
+  font-size: 11px;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+/* The wizard's progress line: one dash per step, filled up to where you are. No numbers and no
+   step titles — each step is one or two fields, so the dashes say "there is more" and "you are
+   here" and nothing else needs saying. */
+.bots-steps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.bots-steps b {
+  margin-left: 4px;
+  font-size: 12.4px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.bots-step {
+  width: 22px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+.bots-step.on {
+  background: var(--brand);
+}
+/* Passed steps stay filled but dimmed, so where you are is the bright one and how far you have
+   come is still visible behind it. */
+.bots-step.done {
+  background: var(--brand);
+  opacity: 0.45;
+}
+
+/* The @ sits inside the control, sharing its border, so the prefix and the field read as one
+   thing rather than as a label with an unrelated box next to it. */
+.bots-handle {
+  display: flex;
+  align-items: stretch;
+}
+.bots-handle > span {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-right: none;
+  border-radius: var(--radius) 0 0 var(--radius);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 13.4px;
+}
+.bots-handle .input {
+  flex: 1;
+  min-width: 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+/* ==========================================================================
+   BotFather
+
+   A conversation rather than a form, so it borrows the messenger's own parts:
+   .msg-row, .bubble with its tails, .composer and .send-btn. Everything new here
+   is the chrome around them — a thread that fills the viewport, command chips
+   standing in for Telegram's command menu, and the small buttons BotFather draws
+   under a reply. No new colour or radius: the tokens do all of it.
+   ========================================================================== */
+
+.father-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.father-head {
+  flex: none;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 16px 18px 0;
+}
+
+/* The bot's face, matching .bots-mark's outlined gold square. */
+.father-avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid var(--brand);
+  color: var(--brand);
+}
+
+/* The conversation. Scrolls on its own so the composer stays put at the bottom. */
+.father-thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 18px 14px;
+}
+
+/* The token block inside a reply. */
+.father-token {
+  margin-top: 8px;
+}
+.father-token .father-btn {
+  margin-top: 8px;
+}
+
+/* The buttons under a reply, as Telegram draws them under a BotFather message. */
+.father-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+.father-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.3;
+}
+.father-btn:hover {
+  background: var(--hover);
+}
+.father-btn.danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger);
+}
+.father-btn:disabled {
+  opacity: 0.5;
+}
+
+/* Telegram's command menu, as chips. The commands are also typeable; this is so somebody who
+   does not know them can still find them without guessing. */
+.father-chips {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 0 18px 10px;
+}
+.father-chip {
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.6px;
+}
+.father-chip:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.father-chip:disabled {
+  opacity: 0.5;
+}
+
+/* Aligned with the thread either side, rather than .composer's own 14px. */
+.father-composer {
+  padding: 8px 18px 14px;
+}
+
+.father-typing {
+  color: var(--muted);
+  letter-spacing: 2px;
 }
