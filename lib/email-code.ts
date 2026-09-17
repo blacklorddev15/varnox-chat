@@ -106,7 +106,9 @@ export type StartEmailCodeResult =
  */
 export async function startEmailCode(
   email: string,
-  ip: string | null
+  ip: string | null,
+  /** Masked number, when the caller knows one, so the message can name what it is for. */
+  number = ''
 ): Promise<StartEmailCodeResult> {
   const to = normaliseEmail(email);
   if (!to) return { ok: false, status: 400, error: 'That is not a valid email address.' };
@@ -171,7 +173,7 @@ export async function startEmailCode(
 
   // Derive the minutes from the constant rather than repeating it, so the message can never
   // claim a different expiry from the one the row actually has.
-  const sent = await sendEmailCode(to, code, Math.round(EMAIL_CODE_TTL_MS / 60_000));
+  const sent = await sendEmailCode(to, code, Math.round(EMAIL_CODE_TTL_MS / 60_000), number);
   if (!sent.ok) {
     // Leave no code behind: a send that failed must not leave a valid code the caller was never
     // told about.

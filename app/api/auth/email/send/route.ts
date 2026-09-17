@@ -1,9 +1,10 @@
 import { bad, clean, clientIp, handle, ok, readJsonBody } from '@/lib/api';
 import { startEmailCode } from '@/lib/email-code';
+import { maskPhone } from '@/lib/phone';
 
 export const dynamic = 'force-dynamic';
 
-type Body = { email?: string };
+type Body = { email?: string; phone?: string; dial?: string };
 
 /**
  * POST /api/auth/email/send — mail a code to an address, before any account exists.
@@ -29,7 +30,11 @@ export async function POST(req: Request) {
     const email = clean(body.email, 254);
     if (!email) return bad('Enter your email address');
 
-    const result = await startEmailCode(email, clientIp(req));
+    // The number is only for the message, so a wrong one is cosmetic rather than dangerous —
+    // and it is masked before it goes anywhere, so the full number never reaches a mailbox.
+    const phone = clean(body.phone, 20);
+    const dial = clean(body.dial, 4);
+    const result = await startEmailCode(email, clientIp(req), maskPhone(phone, dial));
     if (!result.ok) return bad(result.error, result.status);
 
     return ok({

@@ -1,6 +1,7 @@
 import { requireUser } from '@/lib/auth';
 import { bad, clientIp, handle, ok } from '@/lib/api';
 import { startEmailCode } from '@/lib/email-code';
+import { maskPhone } from '@/lib/phone';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +27,7 @@ export async function POST(req: Request) {
       return ok({ sent: false, alreadyVerified: true, to: me.email });
     }
 
-    const result = await startEmailCode(me.email, clientIp(req));
+    const result = await startEmailCode(me.email, clientIp(req), maskPhone(me.phone));
     if (!result.ok) return bad(result.error, result.status);
 
     return ok({

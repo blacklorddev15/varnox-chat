@@ -32,6 +32,34 @@ export function formatPhone(phone: string | null | undefined): string {
   return `+${digits.slice(0, 2)} ${digits.slice(2, 6)} ${digits.slice(6)}`;
 }
 
+/**
+ * A number with its middle hidden, for naming it back to its owner.
+ *
+ * The purpose is recognition, not secrecy: somebody who asked for a code should be able to tell
+ * from the message which number it belongs to, without the whole number travelling to a mailbox
+ * that may not be theirs. The country and the last three digits are enough to recognise a number
+ * you own, and not enough to be useful to anybody else.
+ *
+ * `dial` is the country code the caller already knows — the signup form has it in the selector —
+ * and it is used rather than guessed. Guessing from the length, as formatPhone does, reads a
+ * Kenyan number as +25 47… — the wrong country, which is worse than showing no country at all.
+ * With no dial code the tail is still shown on its own, because a partially useful mask is better
+ * than none.
+ */
+export function maskPhone(phone: string | null | undefined, dial = ''): string {
+  if (!phone) return '';
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length < 7) return '';
+
+  const dialDigits = dial.replace(/\D/g, '');
+  const known = dialDigits.length >= 1 && dialDigits.length <= 3 && digits.startsWith(dialDigits);
+  const head = known ? `+${dialDigits} ` : '';
+  const rest = known ? digits.slice(dialDigits.length) : digits;
+
+  if (rest.length <= 3) return `${head}${rest}`.trim();
+  return `${head}${'•'.repeat(rest.length - 3)}${rest.slice(-3)}`;
+}
+
 /** True when the text could be someone typing a phone number rather than a handle. */
 export function looksLikePhone(input: string): boolean {
   const trimmed = input.trim();

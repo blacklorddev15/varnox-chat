@@ -69,14 +69,19 @@ function sender(): string | null {
  * instead of a typo in a variable — so the fallback is used and the reason is logged, which is the
  * one outcome that neither breaks the flow nor hides the mistake.
  */
-function customBody(code: string, minutes: number): string | null {
+function customBody(code: string, minutes: number, number = ''): string | null {
   const custom = (process.env.MAIL_BODY ?? '').trim();
   if (!custom) return null;
   if (!custom.includes('{code}')) {
     console.error('[varnox] MAIL_BODY has no {code} placeholder; using the built-in wording');
     return null;
   }
-  return custom.replaceAll('{code}', code).replaceAll('{minutes}', String(minutes));
+  return custom
+    .replaceAll('{code}', code)
+    .replaceAll('{minutes}', String(minutes))
+    // Masked, never the whole number, and described rather than left blank when the caller did
+    // not know it — "the code is for your number" still reads, an empty gap does not.
+    .replaceAll('{number}', number || 'your number');
 }
 
 /** The subject line: MAIL_SUBJECT when set, otherwise the built-in one. */
@@ -88,9 +93,9 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-export function verificationMessage(code: string, minutes: number): string {
+export function verificationMessage(code: string, minutes: number, number = ''): string {
   return (
-    customBody(code, minutes) ??
+    customBody(code, minutes, number) ??
     `Your Varnox confirmation code is ${code}. It expires in ${minutes} minutes. If you did not ask for this, ignore this message.`
   );
 }
@@ -102,8 +107,8 @@ export function verificationMessage(code: string, minutes: number): string {
  * stripped by most mail clients, and a remote image is a read-receipt the recipient did not
  * agree to.
  */
-export function verificationHtml(code: string, minutes: number): string {
-  const custom = customBody(code, minutes);
+export function verificationHtml(code: string, minutes: number, number = ''): string {
+  const custom = customBody(code, minutes, number);
 
   /*
     A custom body is rendered as the owner wrote it: blank lines become paragraphs, single breaks
@@ -212,10 +217,12 @@ async function recordOutbox(
 export async function sendEmailCode(
   to: string,
   code: string,
-  minutes: number
+  minutes: number,
+  /** The masked number to name in the message, when the caller has one to name. */
+  number = ''
 ): Promise<MailResult> {
-  const text = verificationMessage(code, minutes);
-  const html = verificationHtml(code, minutes);
+  const text = verificationMessage(code, minutes, number);
+  const html = verificationHtml(code, minutes, number);
 
   // Explicit opt-in for local work: the code goes to the server log instead of a mailbox.
   // Deliberately not the default, so a misconfigured deployment cannot look like success while

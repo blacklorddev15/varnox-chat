@@ -281,7 +281,7 @@ export function AuthScreen({
     try {
       const res = await post<{ to: string; expiresInSec: number; resendInSec: number }>(
         '/api/auth/email/send',
-        { email }
+        { email, phone, dial: country }
       );
       setDigits(Array(CODE_LENGTH).fill(''));
       setNotice(`We sent a 6-digit code to ${res.to}`);
