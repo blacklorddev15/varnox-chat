@@ -57,8 +57,42 @@ function sender(): string | null {
  * because the endpoint that accepts a code reads the address from that session rather than from
  * the request.
  */
+/**
+ * The owner's own wording, or null when there is none worth using.
+ *
+ * MAIL_BODY is the deployment's text, with `{code}` and `{minutes}` replaced. Putting the copy in
+ * a variable rather than in this file is the same reasoning as MAIL_FROM: it is a string somebody
+ * wants to change, and needing a release to change three lines of copy is a poor trade.
+ *
+ * A custom body that does not contain `{code}` is refused rather than used. An email that leaves
+ * out the code cannot be acted on, and quietly sending one would look like a broken confirmation
+ * instead of a typo in a variable — so the fallback is used and the reason is logged, which is the
+ * one outcome that neither breaks the flow nor hides the mistake.
+ */
+function customBody(code: string, minutes: number): string | null {
+  const custom = (process.env.MAIL_BODY ?? '').trim();
+  if (!custom) return null;
+  if (!custom.includes('{code}')) {
+    console.error('[varnox] MAIL_BODY has no {code} placeholder; using the built-in wording');
+    return null;
+  }
+  return custom.replaceAll('{code}', code).replaceAll('{minutes}', String(minutes));
+}
+
+/** The subject line: MAIL_SUBJECT when set, otherwise the built-in one. */
+export function mailSubject(): string {
+  return (process.env.MAIL_SUBJECT ?? '').trim() || 'Your Varnox confirmation code';
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 export function verificationMessage(code: string, minutes: number): string {
-  return `Your Varnox confirmation code is ${code}. It expires in ${minutes} minutes. If you did not ask for this, ignore this message.`;
+  return (
+    customBody(code, minutes) ??
+    `Your Varnox confirmation code is ${code}. It expires in ${minutes} minutes. If you did not ask for this, ignore this message.`
+  );
 }
 
 /**
@@ -69,11 +103,35 @@ export function verificationMessage(code: string, minutes: number): string {
  * agree to.
  */
 export function verificationHtml(code: string, minutes: number): string {
+  const custom = customBody(code, minutes);
+
+  /*
+    A custom body is rendered as the owner wrote it: blank lines become paragraphs, single breaks
+    become line breaks, and the text is escaped so an ampersand or an angle bracket survives
+    intact. The built-in wording instead gets the code set large, which is the one thing the
+    generic version can do that arbitrary copy cannot.
+
+    No links in either branch, and no external assets: a stylesheet or a remote image is stripped
+    or blocked by most mail clients, and a remote image is a read-receipt the recipient never
+    agreed to.
+  */
+  const inner = custom
+    ? custom
+        .split(/\n{2,}/)
+        .map(
+          (para) =>
+            `<p style="margin:0 0 12px">${escapeHtml(para).replaceAll('\n', '<br>')}</p>`
+        )
+        .join('')
+    : [
+        '<p style="margin:0 0 12px">Confirm this address for your Varnox account.</p>',
+        `<p style="margin:0 0 12px;font-size:26px;font-weight:700;letter-spacing:4px">${code}</p>`,
+        `<p style="margin:0 0 12px">The code expires in ${minutes} minutes. If you did not ask for this, ignore this message.</p>`,
+      ].join('');
+
   return [
     '<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;font-size:15px;line-height:1.5;color:#1a1a1a">',
-    '<p style="margin:0 0 12px">Confirm this address for your Varnox account.</p>',
-    `<p style="margin:0 0 12px;font-size:26px;font-weight:700;letter-spacing:4px">${code}</p>`,
-    `<p style="margin:0 0 12px">The code expires in ${minutes} minutes. If you did not ask for this, ignore this message.</p>`,
+    inner,
     '<p style="margin:16px 0 0;color:#6b6b6b;font-size:13px">Varnox</p>',
     '</div>',
   ].join('');
@@ -226,7 +284,7 @@ async function sendResend(
     body: JSON.stringify({
       from,
       to: [to],
-      subject: 'Your Varnox confirmation code',
+      subject: mailSubject(),
       text,
       html,
     }),
