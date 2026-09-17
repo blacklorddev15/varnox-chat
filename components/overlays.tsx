@@ -6,42 +6,19 @@ import type { ChatRow, StarredItem } from '@/lib/types';
 import { dayLabel, timeOfDay } from '@/lib/format';
 import { Avatar } from './avatar';
 import { IconClose, IconDoc, IconForward, IconImage, IconMic, IconSearch, IconStar } from './icons';
-
-function Shell({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="sheet">
-        <div className="sheet-head">
-          <h3>{title}</h3>
-          <button type="button" className="header-btn" onClick={onClose} title="Close">
-            <IconClose />
-          </button>
-        </div>
-        <div className="sheet-body">{children}</div>
-      </div>
-    </div>
-  );
-}
+import { PaneScreen } from './panels';
 
 export function StarredPanel({
   items,
-  onClose,
+  onBack,
   onOpenChat,
 }: {
   items: StarredItem[];
-  onClose: () => void;
+  onBack: () => void;
   onOpenChat: (chatId: string) => void;
 }) {
   return (
-    <Shell title="Starred messages" onClose={onClose}>
+    <PaneScreen title="Starred messages" onBack={onBack}>
       {items.length === 0 ? (
         <p className="hint">
           No starred messages yet. Open a message&apos;s menu and pick <b>Star</b> to keep it here.
@@ -78,7 +55,7 @@ export function StarredPanel({
           </button>
         ))
       )}
-    </Shell>
+    </PaneScreen>
   );
 }
 
@@ -93,10 +70,10 @@ type SearchResults = {
 };
 
 export function SearchPanel({
-  onClose,
+  onBack,
   onOpenChat,
 }: {
-  onClose: () => void;
+  onBack: () => void;
   onOpenChat: (chatId: string) => void;
 }) {
   const [q, setQ] = useState('');
@@ -128,7 +105,7 @@ export function SearchPanel({
   }, [q]);
 
   return (
-    <Shell title="Search messages" onClose={onClose}>
+    <PaneScreen title="Search messages" onBack={onBack}>
       <div className="search-box" style={{ marginBottom: 12 }}>
         <IconSearch size={18} />
         <input
@@ -168,7 +145,7 @@ export function SearchPanel({
           </div>
         ))
       )}
-    </Shell>
+    </PaneScreen>
   );
 }
 

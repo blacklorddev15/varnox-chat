@@ -38,7 +38,7 @@ export function SettingsScreen({
   me,
   isAdmin,
   settings,
-  onClose,
+  onBack,
   onSave,
   onEditProfile,
   onLinkedDevices,
@@ -51,7 +51,7 @@ export function SettingsScreen({
   /** Whether the viewer may open the owner's controls. Decided on the server, never here. */
   isAdmin: boolean;
   settings: UserSettings;
-  onClose: () => void;
+  onBack: () => void;
   onSave: (patch: Record<string, unknown>) => Promise<UserSettings | null>;
   onEditProfile: () => void;
   onLinkedDevices: () => void;
@@ -114,7 +114,7 @@ export function SettingsScreen({
         <button
           type="button"
           className="header-btn"
-          onClick={() => (section === 'root' ? onClose() : setSection('root'))}
+          onClick={() => (section === 'root' ? onBack() : setSection('root'))}
           title="Back"
         >
           <IconBack />

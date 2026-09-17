@@ -2086,6 +2086,12 @@ html[data-theme='dark'] .menu-ic {
   .app:not(.show-chat) .chat-pane {
     display: none;
   }
+  /* A pane is a destination, so on a phone it owns the screen the way a chat does. Without
+     this the sidebar and the pane would stack as two grid rows, because the phone layout is
+     a single column. */
+  .app.show-pane .sidebar {
+    display: none;
+  }
   .back-btn {
     display: inline-flex;
   }

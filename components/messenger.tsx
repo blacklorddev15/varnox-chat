@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { api, post, uploadMedia } from '@/lib/client';
 import type {
   Call,
@@ -76,6 +76,26 @@ function beep() {
   }
 }
 
+/**
+ * The screens that are routes rather than panels.
+ *
+ * Reading the path instead of a piece of state is what makes these addresses real: a hard
+ * load of /chat/settings paints Settings, and the browser's back gesture has somewhere to
+ * go. They replace the chat column rather than covering it — `.pane` is built for that
+ * column, where a sheet would have been an `.overlay` over the conversation.
+ *
+ * Everything not listed here is still a panel: a sheet over whatever is underneath. The two
+ * mechanisms coexist because the migration is only half done, and this map is the whole
+ * list of which is which.
+ */
+const ROUTED_PANES: Record<string, 'new-group' | 'profile' | 'settings' | 'starred' | 'search'> = {
+  '/chat/new-group': 'new-group',
+  '/chat/profile': 'profile',
+  '/chat/settings': 'settings',
+  '/chat/starred': 'starred',
+  '/chat/search': 'search',
+};
+
 export function Messenger({
   me: initialMe,
   isAdmin = false,
@@ -85,6 +105,22 @@ export function Messenger({
   isAdmin?: boolean;
 }) {
   const router = useRouter();
+  /** Which pane this address names, if any. Null on /chat itself. */
+  const routedPane = ROUTED_PANES[usePathname()] ?? null;
+  /**
+   * Back goes to the list, with push and never back(): a pane can be hard loaded straight
+   * from a link, and `back()` from there would leave the app altogether.
+   */
+  const backToChat = useCallback(() => router.push('/chat'), [router]);
+  /**
+   * Whether a routed pane owns the column, held in a ref as well as derived from the path.
+   *
+   * openChat needs to know this without taking it as a dependency: openChat appears in the
+   * dependency list of three effects, and giving it a new identity every time the path
+   * changes would re-run all three on every navigation.
+   */
+  const paneOpenRef = useRef(false);
+  paneOpenRef.current = Boolean(routedPane);
   const [me, setMe] = useState<PublicUser>(initialMe);
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [chats, setChats] = useState<ChatRow[]>([]);
@@ -102,18 +138,14 @@ export function Messenger({
   const [sending, setSending] = useState(false);
   const [reply, setReply] = useState<ReplyDraft>(null);
   const [selection, setSelection] = useState<string[]>([]);
+  /**
+   * The panels that are still sheets. The five that became routes — new-group, profile,
+   * settings, starred and search — are deliberately absent: the path is the only thing that
+   * decides them now, so there is no second source of truth to fall out of step with the
+   * address bar.
+   */
   const [panel, setPanel] = useState<
-    | null
-    | 'new-chat'
-    | 'new-group'
-    | 'profile'
-    | 'chat-info'
-    | 'settings'
-    | 'linked-devices'
-    | 'whatsapp-link'
-    | 'starred'
-    | 'search'
-    | 'forward'
+    null | 'new-chat' | 'chat-info' | 'linked-devices' | 'whatsapp-link' | 'forward'
   >(null);
   const [starred, setStarred] = useState<StarredItem[]>([]);
   const [toast, setToast] = useState('');
@@ -274,6 +306,17 @@ export function Messenger({
 
   const openChat = useCallback(
     async (chatId: string) => {
+      /**
+       * A chat cannot be shown while a pane owns the column, so opening one leaves the pane
+       * first. Without this the sidebar would select a conversation that never appears —
+       * the path would still say /chat/settings, so the column would keep painting the pane
+       * and the tap would look like it did nothing.
+       *
+       * This covers every way in, including the notification handler and the callers that
+       * open a chat as soon as it is created, which is what creating a group from its own
+       * pane does.
+       */
+      if (paneOpenRef.current) router.push('/chat');
       selectedRef.current = chatId;
       setSelectedId(chatId);
       setMessages([]);
@@ -299,7 +342,7 @@ export function Messenger({
         setOpeningChat(false);
       }
     },
-    [flash]
+    [flash, router]
   );
   const openChatRef = useRef<((id: string) => void) | null>(null);
   openChatRef.current = openChat;
@@ -690,15 +733,28 @@ export function Messenger({
     [flash]
   );
 
-  const openStarred = useCallback(async () => {
-    setPanel('starred');
-    try {
-      const res = await api<{ starred: StarredItem[] }>('/api/starred');
-      setStarred(res.starred);
-    } catch {
-      setStarred([]);
-    }
-  }, []);
+  const openStarred = useCallback(() => router.push('/chat/starred'), [router]);
+
+  /**
+   * Starred items are fetched while the starred pane is open, which does two things the
+   * click handler could not. An account that never opens the pane never pays for the
+   * request, and a hard load of /chat/starred fetches them — the handler only ran when the
+   * pane was opened from inside the app.
+   */
+  useEffect(() => {
+    if (routedPane !== 'starred') return;
+    let alive = true;
+    api<{ starred: StarredItem[] }>('/api/starred')
+      .then((res) => {
+        if (alive) setStarred(res.starred);
+      })
+      .catch(() => {
+        if (alive) setStarred([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [routedPane]);
 
   const bulkAction = useCallback(
     async (action: 'delete' | 'star' | 'unstar') => {
@@ -885,7 +941,7 @@ export function Messenger({
   const archived = useMemo(() => chats.filter((c) => c.archived), [chats]);
 
   return (
-    <div className={`app${selectedId ? ' show-chat' : ''}`}>
+    <div className={`app${selectedId ? ' show-chat' : ''}${routedPane ? ' show-pane' : ''}`}>
       <Sidebar
         me={me}
         settings={settings}
@@ -903,66 +959,89 @@ export function Messenger({
         onFilter={setFilter}
         onSelectChat={openChat}
         onNewChat={() => setPanel('new-chat')}
-        onNewGroup={() => setPanel('new-group')}
-        onProfile={() => setPanel('profile')}
-        onSettings={() => setPanel('settings')}
+        onNewGroup={() => router.push('/chat/new-group')}
+        onProfile={() => router.push('/chat/profile')}
+        onSettings={() => router.push('/chat/settings')}
         onStarred={openStarred}
-        onSearch={() => setPanel('search')}
+        onSearch={() => router.push('/chat/search')}
         onJoinByCode={joinByCode}
         onToggleTheme={toggleTheme}
         onSignOut={signOut}
         onToggleArchive={(chatId, on) => setPref(chatId, { archived: on })}
       />
 
-      <ChatPane
-        me={me}
-        chat={selected}
-        messages={messages}
-        reads={reads}
-        reactions={reactions}
-        views={views}
-        typing={typing}
-        disappearSec={disappearSec}
-        hasMore={hasMore}
-        loading={openingChat}
-        sending={sending}
-        reply={reply}
-        selection={selection}
-        theme={theme}
-        wallpaper={settings.wallpaper}
-        boxRef={messagesBox}
-        onBack={() => {
-          selectedRef.current = null;
-          setSelectedId(null);
-          setMessages([]);
-        }}
-        onToggleTheme={toggleTheme}
-        onOpenInfo={() => setPanel('chat-info')}
-        onStartChat={startChatWith}
-        onSend={send}
-        onReact={react}
-        onReply={setReply}
-        onEdit={editMessage}
-        onDelete={deleteMessage}
-        onStar={starMessage}
-        onForward={startForward}
-        onSelection={setSelection}
-        onBulk={bulkAction}
-        onTyping={notifyTyping}
-        onLoadOlder={loadOlder}
-        blocked={Boolean(selected?.peer && settings.blocked.includes(selected.peer.id))}
-      />
+      {/* The pane this address names, or the conversation. One or the other fills the
+          column; the pane does not sit on top of the chat, because a destination that hid
+          the conversation would leave the back gesture meaning two different things.
+
+          Starred and Search hand openChat straight to their rows rather than pushing /chat
+          and then opening: openChat leaves the pane itself, and two pushes in one tick
+          would put the same URL in the history twice. */}
+      {routedPane === 'new-group' ? (
+        <NewGroupPanel me={me} onBack={backToChat} onCreate={createGroup} />
+      ) : routedPane === 'profile' ? (
+        <ProfilePanel me={me} onBack={backToChat} onSave={saveProfile} />
+      ) : routedPane === 'settings' ? (
+        <SettingsScreen
+          me={me}
+          isAdmin={isAdmin}
+          settings={settings}
+          onBack={backToChat}
+          onSave={saveSettings}
+          onEditProfile={() => router.push('/chat/profile')}
+          onLinkedDevices={() => setPanel('linked-devices')}
+          onLinkWhatsApp={() => setPanel('whatsapp-link')}
+          onSignOut={signOut}
+          onOpenStarred={openStarred}
+          onToast={flash}
+        />
+      ) : routedPane === 'starred' ? (
+        <StarredPanel items={starred} onBack={backToChat} onOpenChat={openChat} />
+      ) : routedPane === 'search' ? (
+        <SearchPanel onBack={backToChat} onOpenChat={openChat} />
+      ) : (
+        <ChatPane
+          me={me}
+          chat={selected}
+          messages={messages}
+          reads={reads}
+          reactions={reactions}
+          views={views}
+          typing={typing}
+          disappearSec={disappearSec}
+          hasMore={hasMore}
+          loading={openingChat}
+          sending={sending}
+          reply={reply}
+          selection={selection}
+          theme={theme}
+          wallpaper={settings.wallpaper}
+          boxRef={messagesBox}
+          onBack={() => {
+            selectedRef.current = null;
+            setSelectedId(null);
+            setMessages([]);
+          }}
+          onToggleTheme={toggleTheme}
+          onOpenInfo={() => setPanel('chat-info')}
+          onStartChat={startChatWith}
+          onSend={send}
+          onReact={react}
+          onReply={setReply}
+          onEdit={editMessage}
+          onDelete={deleteMessage}
+          onStar={starMessage}
+          onForward={startForward}
+          onSelection={setSelection}
+          onBulk={bulkAction}
+          onTyping={notifyTyping}
+          onLoadOlder={loadOlder}
+          blocked={Boolean(selected?.peer && settings.blocked.includes(selected.peer.id))}
+        />
+      )}
 
       {panel === 'new-chat' ? (
         <NewChatPanel me={me} onClose={() => setPanel(null)} onPick={startChatWith} />
-      ) : null}
-
-      {panel === 'new-group' ? (
-        <NewGroupPanel me={me} onClose={() => setPanel(null)} onCreate={createGroup} />
-      ) : null}
-
-      {panel === 'profile' ? (
-        <ProfilePanel me={me} onClose={() => setPanel(null)} onSave={saveProfile} />
       ) : null}
 
       {panel === 'chat-info' && selected ? (
@@ -984,49 +1063,12 @@ export function Messenger({
         />
       ) : null}
 
-      {panel === 'settings' ? (
-        <SettingsScreen
-          me={me}
-          isAdmin={isAdmin}
-          settings={settings}
-          onClose={() => setPanel(null)}
-          onSave={saveSettings}
-          onEditProfile={() => setPanel('profile')}
-          onLinkedDevices={() => setPanel('linked-devices')}
-          onLinkWhatsApp={() => setPanel('whatsapp-link')}
-          onSignOut={signOut}
-          onOpenStarred={openStarred}
-          onToast={flash}
-        />
-      ) : null}
-
       {panel === 'linked-devices' ? (
         <LinkedDevicesPanel onClose={() => setPanel(null)} />
       ) : null}
 
       {panel === 'whatsapp-link' ? (
         <WhatsAppLinkPanel onClose={() => setPanel(null)} />
-      ) : null}
-
-      {panel === 'starred' ? (
-        <StarredPanel
-          items={starred}
-          onClose={() => setPanel(null)}
-          onOpenChat={(chatId) => {
-            setPanel(null);
-            openChat(chatId);
-          }}
-        />
-      ) : null}
-
-      {panel === 'search' ? (
-        <SearchPanel
-          onClose={() => setPanel(null)}
-          onOpenChat={(chatId) => {
-            setPanel(null);
-            openChat(chatId);
-          }}
-        />
       ) : null}
 
       {panel === 'forward' ? (

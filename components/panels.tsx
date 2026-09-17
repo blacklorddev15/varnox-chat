@@ -7,7 +7,7 @@ import { presence, relativeTime } from '@/lib/format';
 import { formatPhone } from '@/lib/phone';
 import { Avatar } from './avatar';
 import { MediaGallery } from './overlays';
-import { IconCheck, IconClock, IconClose, IconLink, IconSearch } from './icons';
+import { IconBack, IconCheck, IconClock, IconClose, IconLink, IconSearch } from './icons';
 
 export function Sheet({
   title,
@@ -32,6 +32,42 @@ export function Sheet({
         <div className="sheet-body">{children}</div>
         {footer ? <div className="sheet-foot">{footer}</div> : null}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The same screen as a Sheet, but living in the chat column instead of over everything.
+ *
+ * A destination reached from the menu is a page, and a page that covers the sidebar and the
+ * chat list with a backdrop is not what a page looks like — it is a dialog. This fills the
+ * column the chat pane would have used, so the sidebar stays where it is and the way back is
+ * a control in the header rather than a tap on the backdrop.
+ *
+ * The API mirrors Sheet's on purpose: the panel internals do not know or care which one is
+ * wrapping them, so moving one between the two is a one-line change.
+ */
+export function PaneScreen({
+  title,
+  children,
+  onBack,
+  footer,
+}: {
+  title: string;
+  children: React.ReactNode;
+  onBack: () => void;
+  footer?: React.ReactNode;
+}) {
+  return (
+    <div className="pane">
+      <div className="pane-head">
+        <button type="button" className="header-btn" onClick={onBack} title="Back">
+          <IconBack size={20} />
+        </button>
+        <h3>{title}</h3>
+      </div>
+      <div className="pane-body">{children}</div>
+      {footer ? <div className="pane-foot">{footer}</div> : null}
     </div>
   );
 }
@@ -137,11 +173,11 @@ export function NewChatPanel({
 
 export function NewGroupPanel({
   me,
-  onClose,
+  onBack,
   onCreate,
 }: {
   me: PublicUser;
-  onClose: () => void;
+  onBack: () => void;
   onCreate: (name: string, memberIds: string[]) => void;
 }) {
   const [name, setName] = useState('New group');
@@ -156,12 +192,12 @@ export function NewGroupPanel({
   }
 
   return (
-    <Sheet
+    <PaneScreen
       title="New group"
-      onClose={onClose}
+      onBack={onBack}
       footer={
         <>
-          <button type="button" className="btn ghost" onClick={onClose}>
+          <button type="button" className="btn ghost" onClick={onBack}>
             Cancel
           </button>
           <button
@@ -237,17 +273,17 @@ export function NewGroupPanel({
           are signed in as <b>{label(me)}</b> and become the group admin.
         </p>
       ) : null}
-    </Sheet>
+    </PaneScreen>
   );
 }
 
 export function ProfilePanel({
   me,
-  onClose,
+  onBack,
   onSave,
 }: {
   me: PublicUser;
-  onClose: () => void;
+  onBack: () => void;
   onSave: (body: Record<string, unknown>) => void;
 }) {
   const [displayName, setDisplayName] = useState(me.displayName);
@@ -275,12 +311,12 @@ export function ProfilePanel({
   }
 
   return (
-    <Sheet
+    <PaneScreen
       title="My profile"
-      onClose={onClose}
+      onBack={onBack}
       footer={
         <>
-          <button type="button" className="btn ghost" onClick={onClose}>
+          <button type="button" className="btn ghost" onClick={onBack}>
             Cancel
           </button>
           <button
@@ -388,7 +424,7 @@ export function ProfilePanel({
       </div>
 
       {error ? <p className="error">{error}</p> : null}
-    </Sheet>
+    </PaneScreen>
   );
 }
 
