@@ -17,6 +17,6 @@
   ],
   "shortcuts": [
     { "name": "Open chats", "url": "/chat" },
-    { "name": "Sign in", "url": "/login" }
+    { "name": "Sign in", "url": "/login?signin=1" }
   ]
 }

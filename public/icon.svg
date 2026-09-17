@@ -1,12 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Varnox">
+  <!-- The favicon, kept to the same geometry as scripts/gen_icons.py so the tab and the installed
+       app icon are the same mark. Gold V on a near-black tile with a gold rim: a dark tile has no
+       edge of its own against a dark tab bar. -->
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#19C08E"/>
-      <stop offset="1" stop-color="#0B7D5E"/>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a1509"/>
+      <stop offset="1" stop-color="#0a0805"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#facc15"/>
+      <stop offset="1" stop-color="#d9a900"/>
     </linearGradient>
   </defs>
-  <rect x="0" y="0" width="512" height="512" rx="116" fill="url(#g)"/>
-  <path d="M122 148h52l66 116 76-116h52l-80 208h-60z" fill="#ffffff"/>
-  <circle cx="398" cy="378" r="46" fill="#04352A" opacity="0.35"/>
-  <circle cx="398" cy="378" r="20" fill="#ffffff" opacity="0.92"/>
+  <rect width="512" height="512" rx="116" fill="url(#tile)"/>
+  <rect x="18" y="18" width="476" height="476" rx="96" fill="none" stroke="#facc15" stroke-opacity="0.7" stroke-width="6"/>
+  <polygon points="122,148 174,148 240,264 316,148 368,148 288,356 228,356" fill="url(#gold)"/>
 </svg>
