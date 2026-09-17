@@ -617,32 +617,26 @@ export function AuthScreen({
               </button>
             </form>
 
-            {googleReady ? (
-              /*
-                A plain link rather than a fetch. The browser has to leave for Google's own site,
-                so nothing here can be broken by JavaScript that has not run yet — and a visitor
-                whose connection drops mid-flow is simply back where they started.
-              */
-              <a
-                className="btn ghost"
-                href={`/api/auth/google${next ? `?next=${encodeURIComponent(next)}` : ''}`}
-                style={{
-                  display: 'block',
-                  textAlign: 'center',
-                  marginTop: 12,
-                  textDecoration: 'none',
+            {/*
+              The way back for somebody who already has an account.
+
+              It goes to the sign-in half of this same component rather than out to a URL, so the
+              one screen keeps both jobs and there is no second form to keep in step. Deliberately
+              the only secondary action here: "Use a password instead" and "Link a device" were
+              removed, and with the number step now being where an account is created, a link back
+              to signing in is the only thing a visitor here could still want.
+            */}
+            <div className="switch-line">
+              <button
+                type="button"
+                onClick={() => {
+                  setPasswordMode('login');
+                  setStep('password');
+                  setError('');
+                  setNotice('');
                 }}
               >
-                Continue with Google
-              </a>
-            ) : null}
-
-            <div className="switch-line">
-              <button type="button" onClick={() => { setStep('password'); setError(''); setNotice(''); }}>
-                Use a password instead
-              </button>
-              <button type="button" onClick={() => { setStep('link'); setError(''); setNotice(''); }}>
-                Link a device
+                Login if you have account
               </button>
             </div>
 
