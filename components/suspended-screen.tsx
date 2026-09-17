@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { post } from '@/lib/client';
+import { msUntilUsable, suspensionBlocksUse, suspensionState } from '@/lib/suspension';
 import { IconLogo } from './icons';
 import type { Suspension } from '@/lib/types';
 
@@ -22,6 +23,22 @@ export function SuspendedScreen({ suspension }: { suspension: Suspension }) {
   const [sentAt, setSentAt] = useState<number | null>(suspension.reviewRequestedAt);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  /**
+   * The clock, re-read once a second.
+   *
+   * The suspension lifts on its own, so this screen has to notice that it has — otherwise somebody
+   * whose five hours are up sits looking at a countdown that stopped at zero, on a screen that
+   * would let them in if only it were asked again.
+   */
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const state = suspensionState(suspension.at, sentAt, now);
+  const blocked = suspensionBlocksUse(state);
+  const waitLeft = msUntilUsable(sentAt, now);
 
   async function askForReview() {
     setBusy(true);
@@ -57,7 +74,7 @@ export function SuspendedScreen({ suspension }: { suspension: Suspension }) {
             !
           </span>
           <div>
-            <strong>This account cannot use Varnox</strong>
+            <strong>This account can no longer use the Varnox app</strong>
             <span>
               Access was withdrawn on {day(suspension.at)}. Nothing has been deleted: your chats,
               your messages and your profile are all still here.
@@ -71,17 +88,35 @@ export function SuspendedScreen({ suspension }: { suspension: Suspension }) {
           </p>
         ) : null}
 
+        {/*
+          This used to say a person reviewed every request. That stopped being true when the
+          suspension ladder went in: asking for a review is what starts the clock now, and the
+          access comes back on a schedule rather than on somebody's decision. Telling people a
+          human was looking — when nobody is — would be the screen lying to the one person with
+          the least reason to trust it.
+        */}
         <p className="hint">
-          If you think this was a mistake, ask for it to be reviewed. A person looks at these
-          requests — nothing here is decided automatically.
+          If you think this was a mistake, ask for it to be reviewed. Access returns five hours
+          after you ask, and the suspension is dropped entirely a week after that.
         </p>
 
         <div className="suspend-actions">
           {sentAt ? (
-            <p className="suspend-sent">
-              Review requested on {day(sentAt)}. You will be able to use Varnox again if the
-              suspension is lifted.
-            </p>
+            blocked ? (
+              <p className="suspend-sent">
+                Review requested on {day(sentAt)}. Access returns in {duration(waitLeft)}.
+              </p>
+            ) : (
+              <>
+                <p className="suspend-sent">
+                  Your access has been restored. Sign in again to carry on — coming back from a
+                  suspension takes a fresh sign-in.
+                </p>
+                <button className="btn" onClick={signOut}>
+                  Sign in again
+                </button>
+              </>
+            )
           ) : (
             <button className="btn" onClick={askForReview} disabled={busy}>
               {busy ? 'Sending…' : 'Request review'}
@@ -93,10 +128,38 @@ export function SuspendedScreen({ suspension }: { suspension: Suspension }) {
           <button className="btn ghost" onClick={signOut}>
             Sign out
           </button>
+
+          {/* Asked for directly: somebody who cannot use this account should not have to work out
+              that they are allowed to make another one. It goes to the registration front door
+              rather than the sign-in form, because a new account is what it offers. */}
+          <a
+            className="btn ghost"
+            href="/login?signin=1&mode=register"
+            style={{ display: 'block', textAlign: 'center', textDecoration: 'none' }}
+          >
+            Register a new account
+          </a>
         </div>
       </div>
     </div>
   );
+}
+
+/**
+ * The wait, said the way somebody would say it out loud: "4 hours 12 minutes", not "15240000 ms".
+ * Precision beyond the minute is noise when the thing being waited for is hours away.
+ */
+function duration(ms: number): string {
+  if (ms <= 0) return 'no time at all';
+  const mins = Math.ceil(ms / 60_000);
+  if (mins < 1) return 'under a minute';
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'}`;
+  const hours = Math.floor(mins / 60);
+  const rest = mins % 60;
+  if (hours < 48) {
+    return `${hours} hour${hours === 1 ? '' : 's'}${rest ? ` ${rest} minute${rest === 1 ? '' : 's'}` : ''}`;
+  }
+  return `${Math.floor(hours / 24)} days`;
 }
 
 /** Long-form date: this is read once, by somebody cross about it, so it spells itself out. */
