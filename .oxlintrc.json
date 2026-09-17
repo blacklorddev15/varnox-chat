@@ -1,0 +1,41 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "nextjs", "import", "promise", "unicorn", "typescript", "oxc"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "off"
+  },
+  "ignorePatterns": [".next/**", "node_modules/**", "public/sw.js", "next-env.d.ts"],
+  "rules": {
+    "react/react-in-jsx-scope": "off",
+    "import/no-unassigned-import": "off",
+    "eslint/no-await-in-loop": "off",
+    "unicorn/prefer-add-event-listener": "off",
+    "unicorn/prefer-set-has": "off",
+    "unicorn/no-array-sort": "off",
+    "unicorn/no-array-reverse": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "unicorn/no-useless-fallback-in-spread": "off",
+    "oxc/no-map-spread": "off",
+    "eslint/no-underscore-dangle": "off",
+    "react-hooks/exhaustive-deps": "warn",
+    "react/set-state-in-effect": "warn",
+    "react/exhaustive-effect-dependencies": "warn",
+    "react/refs": "warn",
+    "react/purity": "warn",
+    "react/immutability": "warn",
+    "react/iframe-missing-sandbox": "warn",
+    "promise/always-return": "warn",
+    "import/no-named-as-default-member": "warn",
+    "eslint/no-shadow": "warn",
+    "eslint/no-control-regex": "warn",
+    "eslint/no-useless-escape": "warn"
+  },
+  "overrides": [
+    {
+      "files": ["tests/**/*.ts", "scripts/**/*.mjs", "*.config.ts", "*.config.mjs"],
+      "env": { "node": true }
+    }
+  ]
+}

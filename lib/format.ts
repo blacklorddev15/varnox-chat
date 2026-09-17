@@ -74,3 +74,18 @@ export function shortPreview(text: string, max = 64): string {
   const t = (text || '').replace(/\s+/g, ' ').trim();
   return t.length > max ? t.slice(0, max - 1) + '…' : t;
 }
+
+/**
+ * A full calendar date, for a fact about *when* something happened.
+ *
+ * Distinct from listStamp, which trades precision for brevity because it labels a chat that the
+ * reader already has context for. A bot's creation date is read once, by somebody checking which
+ * of two similar bots is the new one, so the year is worth its width.
+ */
+export function dateStamp(at: number): string {
+  return new Date(at).toLocaleDateString([], {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}

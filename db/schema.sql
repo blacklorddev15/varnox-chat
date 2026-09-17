@@ -849,3 +849,116 @@ create table if not exists vx_oauth_identities (
 
 create index if not exists vx_oauth_identities_user
   on vx_oauth_identities (user_id);
+
+/* ── bots ─────────────────────────────────────────────────────────────────── */
+
+-- A bot an account owns and drives from inside Varnox.
+--
+-- The bot itself runs on a separate, self-hosted Telegram Bot API server, which this app
+-- reaches only through the server-side TELEGRAM_BOT_API_URL. Nothing about that server is
+-- stored here and no part of it is shipped to the browser. What lives in this row is the
+-- owner's own description of the bot plus the credentials needed to talk to Telegram on the
+-- owner's behalf.
+--
+-- `telegram_secret` is the Telegram bot token, encrypted with AES-256-GCM before it is
+-- written (see lib/secretbox.ts) and decrypted only inside a server route that is about to
+-- call Telegram. It cannot be hashed the way a Varnox token is hashed, because Telegram has
+-- to be shown the original value — so the next best thing is done instead: the column never
+-- holds the plaintext, and no query that builds an API response selects it.
+--
+-- `telegram_bot_id` and `telegram_username` are what getMe reported the last time the owner
+-- tested the bot. They exist so a list can be rendered, and say what the bot is, without
+-- decrypting anything. `telegram_checked_at` dates that answer, so a stale one is visible.
+--
+-- `active` is the owner's own switch and is not a credential: it records whether the bot is
+-- meant to be running. Handing a token out is a separate question, answered by vx_bot_tokens.
+--
+-- Keep the semicolon character out of these notes. This file is split on it before the
+-- statements reach Postgres, and one typed inside a comment cuts a statement in half.
+create table if not exists vx_bots (
+  id                  text primary key,
+  user_id             text not null,
+  name                text not null,
+  handle              text,
+  description         text not null default '',
+  active              boolean not null default true,
+  telegram_secret     text,
+  telegram_bot_id     text,
+  telegram_username   text,
+  telegram_checked_at bigint,
+  created_at          bigint not null,
+  updated_at          bigint not null
+);
+
+-- Every read of this table is "the bots this account owns, newest first", which is this index.
+create index if not exists vx_bots_user on vx_bots (user_id, created_at desc);
+
+-- `handle` is the bot's Varnox username: the name an account gives its bot to tell it apart from
+-- the others, in the same spirit as the @username Telegram assigns — except this one is Varnox's
+-- to hand out, because Telegram gives no way to reserve one from here.
+--
+-- Nullable, and the index partial, for the same reason vx_users.email is: rows written before the
+-- column existed are already in the table and must stay valid, and a plain unique index would
+-- treat every one of them as a collision on null. New bots always set one — that is enforced by
+-- the API, not by the column, because the alternative is a migration that cannot be re-run.
+--
+-- Uniqueness is on lower(handle) so it cannot be escaped by capitalisation. Handles are stored
+-- lowercased already, which means this is a second lock on the same door — deliberate, because
+-- the cost of the first one being removed by a later change is two accounts believing they own
+-- the same name.
+--
+-- This file is re-runnable, and a database that already has vx_bots does NOT get the new column
+-- from the create-table statement above, which is a no-op on it. Without this line, the index
+-- below would fail on exactly those databases with "column handle does not exist" — so a fresh
+-- database would work and an existing one would not, which is the worst way round. The same step
+-- exists in lib/migrate.ts for deployments that reconcile in-process rather than from here.
+alter table vx_bots add column if not exists handle text;
+
+-- Keep the semicolon character out of these notes, for the reason given further up.
+create unique index if not exists vx_bots_handle_unique
+  on vx_bots (lower(handle)) where handle is not null;
+
+-- ── the tokens a bot is called with ───────────────────────────────────────────
+--
+-- One row per Varnox API token issued for a bot. The row is the credential's record, and
+-- `token_hash` is the only thing that can prove a presented token is this one.
+--
+-- Only a SHA-256 hash is stored, never the token. A dump of this table therefore yields
+-- nothing that can be presented as a token, which is the whole reason the plaintext is shown
+-- once at creation and never again: there is no second copy to show.
+--
+-- A hash rather than a password hash (scrypt, as used for account passwords) is deliberate.
+-- An account password is short, human-chosen and worth attacking offline in bulk, so it needs
+-- a slow KDF. A Varnox token is 256 bits straight from the CSPRNG, so there is no guessing
+-- space to slow an attacker down in — an offline attack on the hash has nothing to guess —
+-- while verification happens on every bot call and has to stay cheap. The work factor buys
+-- nothing here and would be paid on every request.
+--
+-- `user_id` repeats what vx_bots already knows. It is not redundancy for its own sake: it is
+-- what lets every read and write be scoped by owner in a single WHERE clause with no join,
+-- which is the same rule the rest of this file's bot-facing tables follow. A query that has
+-- to remember to join is a query that will eventually forget to.
+--
+-- `revoked_at` is the whole of a revocation. The row and its history stay, and verification
+-- only ever accepts a row where this is null — so revoking ends a token's life without
+-- deleting the evidence that it existed.
+--
+-- Keep the semicolon character out of these notes, for the same reason as the table above.
+create table if not exists vx_bot_tokens (
+  id         text primary key,
+  bot_id     text not null,
+  user_id    text not null,
+  token_hash text not null,
+  created_at bigint not null,
+  revoked_at bigint
+);
+
+-- Unique, so a hash collision or a repeated insert cannot leave two rows claiming one token.
+-- It is also the index that makes verification a single-row lookup.
+create unique index if not exists vx_bot_tokens_hash on vx_bot_tokens (token_hash);
+
+-- The bot list shows each bot's token state, which is a lookup by bot.
+create index if not exists vx_bot_tokens_bot on vx_bot_tokens (bot_id);
+
+-- Deleting a bot has to find its tokens, and the operator view lists tokens by owner.
+create index if not exists vx_bot_tokens_user on vx_bot_tokens (user_id, created_at desc);

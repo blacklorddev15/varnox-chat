@@ -521,3 +521,69 @@ export type BotThreadMessage = {
   mediaBytes: number | null;
   at: number;
 };
+
+/**
+ * A bot this account owns, as the Bots screen sees it.
+ *
+ * There is no field for the Varnox API token or for the Telegram bot token, and that absence is
+ * the design rather than an omission. The Varnox token is shown once at creation and only its
+ * hash is kept, so there is nothing to put here. The Telegram token is sealed in the database
+ * and opened only inside a server route that is about to call Telegram, so it has no business in
+ * a type that describes an API response.
+ *
+ * What is here instead is what the token *is*, which is the question the screen actually asks:
+ * whether a Telegram token is on file (`hasTelegram`), which bot Telegram said it was on the last
+ * test (`telegramBotId`, `telegramUsername`) and when that answer was given
+ * (`telegramCheckedAt`). Those are facts about the credential, not the credential.
+ */
+export type Bot = {
+  id: string;
+  name: string;
+  /**
+   * The bot's Varnox username — unique across the whole app, lowercase, and the name the account
+   * chose to tell this bot from its others.
+   *
+   * Null only for a row written before the column existed. Every bot created through the wizard
+   * has one, and the wizard is the only way to create one.
+   *
+   * Distinguished from `telegramUsername`, which is Telegram's own @name for the bot, discovered
+   * by the getMe test and not reserved by Varnox at all. Two fields because they are two
+   * different facts, and a single `username` would make it impossible to tell which one is set.
+   */
+  handle: string | null;
+  description: string;
+  /**
+   * The owner's own switch. Turning it off stops the token authenticating anything — see
+   * botForToken() in lib/bots.ts — which is what an owner expects a switch labelled active to do.
+   */
+  active: boolean;
+  createdAt: number;
+  updatedAt: number;
+  /** Whether a Telegram bot token is stored for this bot. Never the token itself. */
+  hasTelegram: boolean;
+  telegramBotId: string | null;
+  telegramUsername: string | null;
+  /** When getMe last confirmed the token, or null if it never has. */
+  telegramCheckedAt: number | null;
+  /**
+   * When the Varnox API token currently issued to this bot was created, or null when none is
+   * live. A revoked token leaves this null, which is how the screen knows to show it as revoked
+   * rather than as never issued.
+   */
+  tokenIssuedAt: number | null;
+  /** When the most recent token was revoked, or null if none ever was. */
+  tokenRevokedAt: number | null;
+};
+
+/**
+ * The only shape in the app that carries a plaintext Varnox token.
+ *
+ * It exists for exactly one response — the one answering the create request — and nowhere else.
+ * A named type rather than an inline object so that "which responses carry a token" is a
+ * question answerable by searching for this name.
+ */
+export type CreatedBot = {
+  bot: Bot;
+  /** Shown once. Only the hash was stored, so this value cannot be recovered later. */
+  token: string;
+};

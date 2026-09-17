@@ -511,6 +511,78 @@ export const STEPS: Step[] = [
     sql: `create index if not exists vx_sms_outbox_phone
             on vx_sms_outbox (to_phone, created_at desc)`,
   },
+  // Bots. Additive like everything above, so a deploy that adds them and a deploy that ignores
+  // them can serve the same database without either noticing — which is what lets this land
+  // without a maintenance window. `telegram_secret` holds a sealed bot token rather than the
+  // plaintext, and the presence check for it is a column, so it is applied once and skipped
+  // afterwards exactly like the rest.
+  {
+    kind: 'table',
+    label: 'vx_bots',
+    sql: `create table if not exists vx_bots (
+            id                  text primary key,
+            user_id             text not null,
+            name                text not null,
+            description         text not null default '',
+            active              boolean not null default true,
+            telegram_secret     text,
+            telegram_bot_id     text,
+            telegram_username   text,
+            telegram_checked_at bigint,
+            created_at          bigint not null,
+            updated_at          bigint not null
+          )`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_bots_user',
+    sql: `create index if not exists vx_bots_user on vx_bots (user_id, created_at desc)`,
+  },
+  {
+    kind: 'table',
+    label: 'vx_bot_tokens',
+    sql: `create table if not exists vx_bot_tokens (
+            id         text primary key,
+            bot_id     text not null,
+            user_id    text not null,
+            token_hash text not null,
+            created_at bigint not null,
+            revoked_at bigint
+          )`,
+  },
+  {
+    // A column added after the table already existed, which is the case this step exists for:
+    // `create table if not exists` above is a no-op on a database that already has vx_bots, so
+    // without this, a deployment upgrading from the first version of bots would have every insert
+    // fail with 42703 while a fresh deployment worked — the worst kind of difference between two
+    // environments.
+    kind: 'column',
+    label: 'vx_bots.handle',
+    sql: `alter table vx_bots add column if not exists handle text`,
+  },
+  {
+    // Partial, so the rows written before the column existed are not all colliding on null.
+    kind: 'index',
+    label: 'vx_bots_handle_unique',
+    sql: `create unique index if not exists vx_bots_handle_unique
+            on vx_bots (lower(handle)) where handle is not null`,
+  },
+  {
+    // Unique as well as a lookup: two rows must never claim one token.
+    kind: 'index',
+    label: 'vx_bot_tokens_hash',
+    sql: `create unique index if not exists vx_bot_tokens_hash on vx_bot_tokens (token_hash)`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_bot_tokens_bot',
+    sql: `create index if not exists vx_bot_tokens_bot on vx_bot_tokens (bot_id)`,
+  },
+  {
+    kind: 'index',
+    label: 'vx_bot_tokens_user',
+    sql: `create index if not exists vx_bot_tokens_user on vx_bot_tokens (user_id, created_at desc)`,
+  },
 ];
 
 /** A request waits this long for reconciliation, then carries on without it. */

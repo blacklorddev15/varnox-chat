@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { SuspendedError, UnauthorizedError } from './auth';
 import { ensureSchema } from './migrate';
+import { ValidationError } from './validate';
 
 export function ok(data: unknown, status = 200) {
   return NextResponse.json(data, {
@@ -39,7 +40,21 @@ export async function handle(fn: () => Promise<Response>): Promise<Response> {
     // through to a 500 and read as a broken server rather than a deliberate lockout. The status
     // and the wording are what let the client show the banner instead of an error toast.
     if (err instanceof SuspendedError) return bad('This account is suspended', 403);
+    /**
+     * A body that failed its schema is the caller's mistake, not the server's, so it is answered
+     * before the generic branches below.
+     *
+     * Without this it fell through to 500: the ValidationError's message is a sentence about a
+     * field ("Bot name is required."), which matches none of the wording tests below. A 500 there
+     * is not merely the wrong number — it tells the client to retry and tells the operator to
+     * look at the server log, when the person who can fix it is the one who typed the form.
+     */
+    if (err instanceof ValidationError) return bad(err.message, 400);
+    // The same argument for a body that is not JSON at all. readJsonBody() throws a plain Error
+    // whose message is the whole body of information available, so this is matched on the
+    // wording; it is the only such test here that is not backed by an error class.
     const message = err instanceof Error ? err.message : 'Server error';
+    if (message === 'Invalid JSON body') return bad(message, 400);
     console.error('[varnox]', message);
     if (schemaDrift(err)) {
       console.error('[varnox] schema drift — the database is missing an object this code expects');

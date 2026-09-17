@@ -566,3 +566,24 @@ export function IconWhatsApp({ size = 20, className }: P) {
     </svg>
   );
 }
+
+/**
+ * A robot head: the mark for "Bots".
+ *
+ * Drawn from the same 24-unit grid and the same 1.8 stroke as every other glyph here, so it sits
+ * beside IconChannel and IconPhone without looking imported. It is deliberately a head and not a
+ * chat bubble or a paper plane — the screen it opens is about bots as objects you own and revoke,
+ * not about messaging, and a second speech balloon in the tab bar would be ambiguous with Chats.
+ */
+export function IconBot({ size = 22, className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} {...S}>
+      <rect x="4" y="8" width="16" height="11" rx="3.2" />
+      <path d="M12 8V5.4" />
+      <circle cx="12" cy="4.2" r="1.2" />
+      <path d="M9.2 12.6v1.6M14.8 12.6v1.6" />
+      <path d="M2.6 11.6v3.6M21.4 11.6v3.6" />
+      <path d="M9.6 16.6h4.8" />
+    </svg>
+  );
+}

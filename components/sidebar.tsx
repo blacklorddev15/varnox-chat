@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import type { ChatRow, PublicUser, UserSettings } from '@/lib/types';
 import { listStamp, shortPreview } from '@/lib/format';
 import { Avatar } from './avatar';
@@ -10,6 +11,7 @@ import { UpdatesScreen } from './updates';
 import {
   IconArchive,
   IconBellOff,
+  IconBot,
   IconChannel,
   IconChat,
   IconCheck,
@@ -238,6 +240,17 @@ export function Sidebar({
               >
                 <IconPin size={18} /> Join with invite code
               </button>
+              {/* A destination rather than an action, so it sits with Settings and My profile
+                  below the separator rather than above it. A Link and not a button because it
+                  leaves this route entirely: /bots is its own page, so the browser's history and
+                  the back gesture keep working — which a client-side panel swap would not. */}
+              <div className="sep" />
+              <Link href="/bots" onClick={() => setMenuOpen(false)}>
+                <IconBot size={18} /> Bots
+              </Link>
+              <Link href="/bots/father" onClick={() => setMenuOpen(false)}>
+                <IconBot size={18} /> BotFather
+              </Link>
               <div className="sep" />
               <button
                 type="button"
@@ -414,6 +427,13 @@ export function Sidebar({
           <IconPhone size={21} />
           <span>Calls</span>
         </button>
+        {/* A route, not a tab. The other four swap which screen fills the sidebar; this one
+            leaves /chat altogether, so it is a Link and never takes the 'on' class — there is
+            no state to be in, because arriving at /bots unmounts this bar. */}
+        <Link href="/bots">
+          <IconBot size={21} />
+          <span>Bots</span>
+        </Link>
       </nav>
     </aside>
   );
