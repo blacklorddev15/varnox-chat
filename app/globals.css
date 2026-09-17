@@ -22,32 +22,31 @@
    ========================================================================== */
 
 :root {
-  /* A muted antique gold, not a bright one. This is the colour of the outlines in the
-     reference, and it is deliberately low-chroma: the bright gold is reserved for text
-     and values, which is what stops the whole screen shouting. */
-  --brand: #d4b04a;
-  --brand-strong: #b8912f;
-  --brand-soft: rgba(212, 176, 74, 0.16);
+  /* The reference's accent, taken as-is: the same gold it puts on its headings, its glyphs
+     and its highlights. This project used to split one gold into a muted outline gold and a
+     bright text gold. The reference does not split it — its outlines are a neutral grey
+     instead — so the gold is single here too, and the outline work has moved to --line. */
+  --brand: #facc15;
+  --brand-strong: #d9a900; /* a step down, for fills that carry text */
+  --brand-soft: rgba(250, 204, 21, 0.16);
   /* The bright gold for headings and values, and the faint wash that sits behind them.
-     One gold cannot do both jobs — the wash has to stay quiet on a dark card while the
-     text on top of it has to stay bright. Both are theme tokens, because the pale theme
-     needs a deeper gold to hold contrast against cream. */
-  --gold-bright: #f0cd6a;
-  --gold-tint: rgba(212, 176, 74, 0.12);
+     Both are theme tokens, because the pale theme needs a deeper gold against cream. */
+  --gold-bright: #facc15;
+  --gold-tint: rgba(250, 204, 21, 0.12);
   /* Headings only. The reference sets its titles in an italic serif, and that is most of
      its character — but only its titles. The body stays on the sans stack: a chat list is
      small text, and a serif at 13px is measurably harder to read at that size. */
-  --font-display: Georgia, 'Times New Roman', 'Noto Serif', serif;
+  --font-display: var(--font-playfair), Georgia, 'Times New Roman', serif;
   /* Ink for anything filled with the brand gold — badges, the send button, primary
      buttons, the floating action button. White on this gold measures 1.8:1, which is
      unreadable, so every gold fill takes this dark brown instead. It is deliberately
      not a theme token: the gold is the same in both themes, so its ink is too. */
-  --on-brand: #1a1408;
-  --tick-read: #ffd166;
-  --danger: #f15c6d;
-  /* The one green in the app. It was inline on the presence dot; it is a token now so a
-     value can borrow it rather than repeat the hex. */
-  --value: #31d158;
+  --on-brand: #422006; /* the reference's primary-foreground */
+  --tick-read: #facc15;
+  --danger: #ef4444; /* the reference's red */
+  /* The reference's green, which it uses for the states it wants read as good: a valid
+     field, a live dot, a tick in a plan list. */
+  --value: #22c55e;
   --radius: 8px;
   --sidebar-w: 30%;
   --sidebar-min: 340px;
@@ -91,39 +90,42 @@ html[data-theme='light'] {
   --shadow-lg: 0 12px 32px rgba(84, 63, 22, 0.24);
   --badge-text: var(--on-brand);
   --tick-read: #8a6410;
-  /* Bright green on cream is about 2:1, so a value set in it would be unreadable. Same
-     problem as the gold, and the same answer: the ramp comes down at this end. */
-  --value: #1f7a37;
+  /* The reference is dark-only, so there is no pale value to copy. This is its green at
+     the lightness a cream surface needs: #22c55e on cream is about 2.3:1, and this is
+     5.3:1. Same hue, same reasoning as the gold ramp at this end. */
+  --value: #157a3a;
 }
 
 html[data-theme='dark'] {
-  /* Near-black, very slightly warm. The reference's cards are almost black; the warmth is
-     a few points of red, which is enough to keep them from reading as a cold grey beside
-     the gold. */
-  --app-bg: #0b0a07;
-  --panel: #100e0a;
-  --panel-2: #16130d;
-  --panel-3: #16130d;
-  --panel-4: #1e1a12;
-  /* The outline. Higher than a hairline and well below a hard edge — the reference's
-     borders are visible at a glance but never bright. */
-  --line: rgba(212, 176, 74, 0.32);
-  --line-strong: rgba(212, 176, 74, 0.58);
-  --text: #e6e1d6;
-  --muted: #9a9384;
-  --header: #12100b;
-  --header-text: #f0cd6a;
-  --header-muted: #b39a5c;
-  --bubble-in: #16130d;
-  --bubble-out: #241e0e;
-  --chat-bg: #0b0a07;
-  --doodle: #6b5a2c;
-  --link: #f0cd6a;
-  --hover: rgba(212, 176, 74, 0.09);
+  /* The reference's surface, and its neutral greys. Its near-black carries no warmth at
+     all, and its cards separate from it with a grey outline rather than a tinted panel, so
+     the panels here step up by only a few points and --line does the rest of the work. */
+  --app-bg: #09090b;
+  --panel: #0c0c0e;
+  --panel-2: #141417;
+  --panel-3: #141417;
+  --panel-4: #1c1c20;
+  /* The outline, straight from the reference: a neutral grey rather than a gold one, which
+     is what leaves the gold free to mean emphasis. --line-strong is that grey a step up,
+     for hover and for edges that have to hold against a filled surface. */
+  --line: #27272a;
+  --line-strong: #3f3f46;
+  --text: #fafafa;
+  --muted: #a1a1aa;
+  --header: #0c0c0e;
+  --header-text: #facc15;
+  --header-muted: #a1a1aa;
+  --bubble-in: #141417;
+  /* Outgoing keeps the accent wash rather than a solid gold, which would drown the text. */
+  --bubble-out: rgba(250, 204, 21, 0.12);
+  --chat-bg: #09090b;
+  --doodle: #3f3f46;
+  --link: #facc15;
+  --hover: rgba(250, 204, 21, 0.08);
   --shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.65);
   --badge-text: var(--on-brand);
-  --tick-read: #f0cd6a;
+  --tick-read: #facc15;
 }
 
 * {
@@ -140,7 +142,7 @@ body {
 body {
   background: var(--app-bg);
   color: var(--text);
-  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Roboto, Arial, sans-serif;
+  font-family: var(--font-inter), 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Roboto, Arial, sans-serif;
   font-size: 14.5px;
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
@@ -1350,6 +1352,42 @@ html[data-theme='dark'] .empty {
   flex: none;
 }
 
+/* The in-column page. Sheet's geometry without the dialog: no backdrop, no max-width, and
+   the height is whatever the column has rather than 88dvh. The second grid cell of .app is
+   1fr wide, so min-width:0 keeps a long word inside it instead of pushing the sidebar. */
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--panel);
+}
+.pane-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  background: var(--header);
+  color: var(--header-text);
+  flex: none;
+}
+/* flex:1 is what makes the body take the leftover height, which is what lets it scroll
+   rather than grow the pane past the viewport. */
+.pane-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+  flex: 1;
+}
+.pane-foot {
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: none;
+}
+
 .btn {
   padding: 9px 18px;
   border-radius: 20px;
@@ -1512,15 +1550,17 @@ html[data-theme='dark'] .tag {
 
 /* ------------------------------------------------------------- settings */
 
+/* Settings is a page now, so it fills the chat column rather than the viewport: the sidebar
+   stays visible and the header's back button is the way out. position:fixed and the shadow went
+   with the overlay it used to be — a page that covers everything is a dialog, which is what this
+   stopped being. */
 .settings-screen {
-  position: fixed;
-  inset: 0;
-  margin: 0 auto;
-  background: var(--panel);
   display: flex;
   flex-direction: column;
-  z-index: 45;
-  box-shadow: var(--shadow-lg);
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--panel);
 }
 @media (min-width: 1000px) {
   .settings-screen {
@@ -3134,6 +3174,7 @@ html[data-theme='dark'] .chat-bg-pattern {
 .brand-name,
 .sc-title,
 .sheet-head h3,
+.pane-head h3,
 .auth-card h1,
 .list-label {
   font-family: var(--font-display);
