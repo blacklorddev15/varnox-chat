@@ -4074,6 +4074,8 @@ html[data-theme='dark'] .bots-field > label {
   text-align: center;
 }
 .welcome-face {
+  display: block;
+  margin: 0 auto;
   width: 88px;
   height: 88px;
   border-radius: 50%;
@@ -4098,12 +4100,11 @@ html[data-theme='dark'] .bots-field > label {
   sentence is — upper case, tracked out, and in the bright gold used for headings.
   
   Written in sentence case in the markup and upper-cased here, so the source stays readable and
-  this treatment lives in one place rather than being re-typed at each call site. Upright rather
-  than italic, because the heading is italic and leaning capitals look like a mistake.
+  this treatment lives in one place rather than being re-typed at each call site. Italic, to sit
+  with the rest of the greeting rather than standing upright in the middle of a slanted line.
 */
 .welcome-brand {
   color: var(--gold-bright);
-  font-style: normal;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -4113,6 +4114,12 @@ html[data-theme='dark'] .bots-field > label {
   color: var(--text-dim);
   font-size: 14px;
   line-height: 1.5;
+  font-style: italic;
+}
+
+/* The same italic for the front door's copy, which borrows .sub for its size and colour. */
+.welcome-copy {
+  font-style: italic;
 }
 /* display matters here, not decoration: an inline box ignores width, so a full-width button
    that is written as a link silently stays the width of its own text. */

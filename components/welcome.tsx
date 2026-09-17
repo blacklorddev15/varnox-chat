@@ -23,10 +23,14 @@ export function Welcome() {
           separate wordmark. Stacking "Varnox" and then "Welcome to Varnox App" made the screen say
           the same word twice in a row, and the second time said it better.
         */}
+        {/* The banner: the first thing on the screen is a face rather than a sentence. */}
+        <img className="welcome-face" src="/welcome.jpg" alt="" width={88} height={88} />
         <h1 className="welcome-title">
           Welcome to <span className="welcome-brand">Varnox App</span>.
         </h1>
-        <p className="sub">
+        {/* Its own class rather than .sub: .sub is the auth screen's body copy too, and italic
+            belongs to this greeting, not to every paragraph in the sign-in flow. */}
+        <p className="sub welcome-copy">
           A place to make friends. Nothing
           <br />
           sold, nothing shared — kept private.
