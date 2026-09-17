@@ -130,7 +130,7 @@ export function AuthScreen({
   startRegister?: boolean;
 }) {
   const router = useRouter();
-  const [step, setStep] = useState<Step>('phone');
+  const [step, setStep] = useState<Step>(startRegister ? 'phone' : 'password');
 
   const [country, setCountry] = useState('');
   const [number, setNumber] = useState('');
@@ -266,14 +266,13 @@ export function AuthScreen({
       return;
     }
     /*
-      Registration proves the email. Signing in still proves the number, and that is not a
-      leftover: every account created before this change was made by the phone step, most of them
-      with no password at all, so texting a code is the only way their owners can get back in.
-      Removing it here would not simplify anything, it would lock them out.
+      There is one code and it goes to the email — no SMS anywhere.
+
+      This screen only ever registers now. Signing in is the password step, reached from the link
+      at the bottom, which is why nothing here has to ask which of the two it is doing.
     */
-    const registering = passwordMode === 'register';
     const email = signupEmail.trim();
-    if (registering && !email) {
+    if (!email) {
       setError('Enter your email address — the code is sent there');
       return;
     }
@@ -281,8 +280,8 @@ export function AuthScreen({
     setError('');
     try {
       const res = await post<{ to: string; expiresInSec: number; resendInSec: number }>(
-        registering ? '/api/auth/email/send' : '/api/auth/otp/start',
-        registering ? { email } : { phone }
+        '/api/auth/email/send',
+        { email }
       );
       setDigits(Array(CODE_LENGTH).fill(''));
       setNotice(`We sent a 6-digit code to ${res.to}`);
@@ -352,19 +351,6 @@ export function AuthScreen({
        * The proof stays server-side: this marks the code row consumed, and /api/auth/register
        * refuses an address that has no such row.
        */
-      if (passwordMode === 'login') {
-        const res = await post<{ user: { displayName: string }; created: boolean }>(
-          '/api/auth/otp/verify',
-          { phone: composed(), code: value }
-        );
-        if (res.created) {
-          setName('');
-          setStep('name');
-        } else {
-          finish();
-        }
-        return;
-      }
       await post('/api/auth/email/confirm', { email: signupEmail.trim(), code: value });
       setName('');
       setSignupStep(2);
@@ -650,9 +636,8 @@ export function AuthScreen({
               {/* Asked here, beside the number, because the code is sent to it — the two belong
                   together on the screen where the visitor is proving who they are. Only while
                   registering: signing in proves the number instead, and has no use for this. */}
-              {passwordMode === 'register' ? (
-                <div className="field-row">
-                  <label htmlFor="signupEmail">Email address</label>
+              <div className="field-row">
+                <label htmlFor="signupEmail">Email address</label>
                   <input
                     id="signupEmail"
                     className="input"
@@ -665,10 +650,9 @@ export function AuthScreen({
                     required
                   />
                   <p className="hint" style={{ marginTop: 6 }}>
-                    We'll send your 6-digit code here and nowhere else.
-                  </p>
-                </div>
-              ) : null}
+                  We'll send your 6-digit code here and nowhere else.
+                </p>
+              </div>
 
               {error ? <p className="error">{error}</p> : null}
 
