@@ -108,6 +108,7 @@ export function AuthScreen({
   next,
   google,
   googleReady,
+  startRegister,
 }: {
   next?: string;
   /** Why the browser is back from Google, when it is. */
@@ -118,6 +119,15 @@ export function AuthScreen({
    * trip to Google and back.
    */
   googleReady?: boolean;
+  /**
+   * Open with the registration wizard already showing, rather than the sign-in form.
+   *
+   * This exists for the welcome screen, whose only action is "Get Started" — landing on a
+   * sign-in form after pressing it would be the wrong half of the component. It sets the same
+   * two pieces of state the "Create an account" link sets, just at first render instead of on a
+   * click, so there is still only one way into the wizard.
+   */
+  startRegister?: boolean;
 }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>('phone');
@@ -134,7 +144,9 @@ export function AuthScreen({
   const [password, setPassword] = useState('');
   /** The code shown by a device that is already signed in, typed here to sign this one in. */
   const [linkCode, setLinkCode] = useState('');
-  const [passwordMode, setPasswordMode] = useState<'login' | 'register'>('login');
+  const [passwordMode, setPasswordMode] = useState<'login' | 'register'>(
+    startRegister ? 'register' : 'login'
+  );
   /**
    * Creating an account collects a phone number, then a username and an address, then a
    * password, then an optional profile picture, then the terms, then a decision about
