@@ -4049,3 +4049,61 @@ html[data-theme='dark'] .bots-field > label {
   color: var(--muted);
   letter-spacing: 2px;
 }
+
+/* ── the first-thing-a-new-account-sees card ────────────────────────────── */
+
+/* Sits over the app rather than inside it: it is a greeting, not a screen you can navigate to or
+   come back to. Everything here is built from tokens that already exist. */
+.welcome-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.72);
+}
+.welcome-card {
+  width: 100%;
+  max-width: 340px;
+  padding: 26px 22px 20px;
+  border: 1px solid var(--gold-edge);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: 0 0 28px var(--gold-glow);
+  text-align: center;
+}
+.welcome-face {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  object-fit: cover;
+  /* Above centre, not centred: the picture is portrait, so a centre crop cuts the forehead and
+     the chin and lands on the middle of the face. */
+  object-position: 50% 28%;
+  border: 2px solid var(--gold-edge);
+}
+.welcome-kicker {
+  margin: 14px 0 0;
+  color: var(--gold-bright);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.welcome-card h2 {
+  margin: 2px 0 10px;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 25px;
+  font-weight: 600;
+}
+.welcome-line {
+  margin: 0 0 18px;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.welcome-card .btn {
+  width: 100%;
+}

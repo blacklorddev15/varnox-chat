@@ -15,6 +15,7 @@ import { CallScreen, IncomingCall } from './calls';
 import { Sidebar } from './sidebar';
 import { ChatPane } from './chat-pane';
 import { SettingsScreen } from './settings-screen';
+import { WelcomeOverlay } from './welcome-overlay';
 import { StarredPanel, SearchPanel, ForwardPanel } from './overlays';
 import {
   NewChatPanel,
@@ -1094,6 +1095,12 @@ export function Messenger({
       {panel === 'whatsapp-link' ? (
         <WhatsAppLinkPanel onClose={() => setPanel(null)} />
       ) : null}
+
+      {/*
+        Greets an account with no conversations yet. Waits for the list to have loaded, so it
+        cannot flash over an existing user whose chats simply have not arrived.
+      */}
+      {listReady && chats.length === 0 ? <WelcomeOverlay name={me.displayName} /> : null}
 
       {panel === 'forward' ? (
         <ForwardPanel chats={chats} onClose={() => setPanel(null)} onForward={doForward} />
