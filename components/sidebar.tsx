@@ -248,8 +248,8 @@ export function Sidebar({
               <Link href="/bots" onClick={() => setMenuOpen(false)}>
                 <IconBot size={18} /> Bots
               </Link>
-              <Link href="/bots/father" onClick={() => setMenuOpen(false)}>
-                <IconBot size={18} /> BotFather
+              <Link href="/bots/support" onClick={() => setMenuOpen(false)}>
+                <IconBot size={18} /> Support bot
               </Link>
               <div className="sep" />
               <button

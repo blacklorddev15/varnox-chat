@@ -3709,12 +3709,13 @@ html[data-theme='dark'] .bots-field > label {
 }
 
 /* ==========================================================================
-   BotFather
+   the chat-page layout
 
-   A conversation rather than a form, so it borrows the messenger's own parts:
-   .msg-row, .bubble with its tails, .composer and .send-btn. Everything new here
-   is the chrome around them — a thread that fills the viewport, command chips
-   standing in for Telegram's command menu, and the small buttons BotFather draws
+   Shared by the Support Bot and a bot conversation, which is why the prefix names the
+   layout rather than a screen. A conversation is not a form, so it borrows the
+   messenger's own parts: .msg-row, .bubble with its tails, .composer and .send-btn.
+   Everything here is the chrome around them — a thread that fills the viewport,
+   command chips standing in for a command menu, and the small buttons a bot draws
    under a reply. No new colour or radius: the tokens do all of it.
    ========================================================================== */
 

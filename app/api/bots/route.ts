@@ -2,7 +2,11 @@ import { requireUser } from '@/lib/auth';
 import { bad, handle, ok, readJsonBody } from '@/lib/api';
 import { botRateMessage, botRateSlot, createBot, handleTaken, listBots } from '@/lib/bots';
 import { listBotThreads } from '@/lib/bot-chat';
-import { BOT_HANDLE_HINT, BOT_HANDLE_MAX, BOT_HANDLE_MIN, BOT_HANDLE_PATTERN } from '@/lib/bot-handle';
+import {
+  BOT_HANDLE_MAX,
+  BOT_HANDLE_MIN,
+  describeHandleProblem,
+} from '@/lib/bot-handle';
 import { TELEGRAM_BOT_TOKEN_PATTERN } from '@/lib/bots-token';
 import { secretKeyAvailable } from '@/lib/secretbox';
 import { bool, optional, str, validate } from '@/lib/validate';
@@ -56,8 +60,6 @@ const CreateSchema = {
     label: 'Username',
     min: BOT_HANDLE_MIN,
     max: BOT_HANDLE_MAX,
-    pattern: BOT_HANDLE_PATTERN,
-    hint: BOT_HANDLE_HINT,
   }),
   description: optional(str({ label: 'Description', max: 500 })),
   active: optional(bool({ label: 'Active status' })),
@@ -118,6 +120,21 @@ export async function POST(req: Request) {
         503
       );
     }
+
+    /**
+     * The format is checked by the same function the wizard uses, rather than by a pattern in the
+     * schema above, so the two cannot drift apart - and so the message names the actual problem.
+     *
+     * A schema pattern can only produce one sentence for every way it can fail, and the commonest
+     * failure by a distance is a username with no -bot on the end. Leading with the full
+     * specification for that is technically correct and practically useless: somebody who typed
+     * "weather" needs to be told the one thing to change.
+     *
+     * Length stays in the schema because it is a property of the field rather than of the format,
+     * and it produces its own precise message there.
+     */
+    const handleProblem = describeHandleProblem(input.handle);
+    if (handleProblem) return bad(handleProblem, 400);
 
     const slot = await botRateSlot(me.id, 'create');
     if (!slot.allowed) return bad(botRateMessage('create', slot.retryAfterMs), 429);

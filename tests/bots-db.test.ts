@@ -60,7 +60,7 @@ const TELEGRAM_TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw';
 let handleSeq = 0;
 function nextHandle(prefix = 'h'): string {
   handleSeq += 1;
-  return `${prefix}${run}${handleSeq}`;
+  return `${prefix}${run}${handleSeq}-bot`;
 }
 
 async function makeAccount(id: string, username: string) {

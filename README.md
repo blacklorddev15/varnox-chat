@@ -335,8 +335,9 @@ Three steps, then the token:
 
 1. **Bot name** — free text.
 2. **Username** — a Varnox handle, pre-suggested from the name and editable. Lowercase letters,
-   digits, `-` and `_`, 3–32 characters, starting and ending alphanumeric. Uniqueness is global, on
-   `lower(handle)`. A capitalised entry is folded, not rejected.
+   digits, `-` and `_`, 5–32 characters, starting and ending alphanumeric, and **ending in `-bot` or
+   `_bot`** — the separator is required, so `support-bot` is accepted and `supportbot` is not.
+   Uniqueness is global, on `lower(handle)`. A capitalised entry is folded, not rejected.
 3. **Telegram token, description, active** — all optional. The token is sealed before storage.
 
 On success the plaintext Varnox API token is shown **once**, with a copy button. Only its SHA-256

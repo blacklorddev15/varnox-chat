@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 /**
  * The conversation with one bot.
  *
- * Gated exactly like /bots and /bots/father: reconcile the schema, resolve the session, check
+ * Gated exactly like /bots and /bots/support: reconcile the schema, resolve the session, check
  * suspension. The bot is looked up scoped by owner, so an id belonging to somebody else is `notFound`
  * rather than a 403 — the same rule the API follows, and for the same reason: a distinct "exists but
  * not yours" turns ids into something worth guessing.

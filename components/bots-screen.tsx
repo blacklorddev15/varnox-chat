@@ -357,12 +357,12 @@ export function BotsScreen({
         <div>
           <h1 className="bots-title">Bots</h1>
           <p className="hint">
-            Telegram bots owned by @{me.username}. Each one gets a Varnox username and an
-            API token when it is created. Use the form here, or talk to BotFather.
+            Telegram bots owned by @{me.username}. Each one gets a Varnox username and an API
+            token when it is created. Use the form here, or talk to the Support bot.
           </p>
         </div>
-        <Link href="/bots/father" className="btn ghost">
-          BotFather
+        <Link href="/bots/support" className="btn ghost">
+          Support bot
         </Link>
         <button
           type="button"

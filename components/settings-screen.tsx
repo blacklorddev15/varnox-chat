@@ -194,12 +194,12 @@ export function SettingsScreen({
                   <small>Telegram bots you own, and their Varnox API tokens</small>
                 </span>
               </Link>
-              <Link href="/bots/father" className="settings-row">
+              <Link href="/bots/support" className="settings-row">
                 <span className="ic">
                   <IconBot />
                 </span>
                 <span className="txt">
-                  BotFather
+                  Support bot
                   <small>Create and manage bots by talking to it</small>
                 </span>
               </Link>

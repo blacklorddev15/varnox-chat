@@ -9,19 +9,19 @@ import { dateStamp } from '@/lib/format';
 import { IconBack, IconBot, IconCopy, IconSend } from './icons';
 
 /**
- * BotFather, inside Varnox.
+ * The Varnox Support Bot.
  *
- * Telegram's BotFather is not an API — it is a bot you have a conversation with. Its whole
- * interface is commands and replies. This is the same idea pointed at Varnox's own bots: a chat
- * where `/newbot` walks you through name, then username, then hands over the token.
+ * Modelled on Telegram's BotFather, which is not an API — it is a bot you have a conversation with,
+ * and its whole interface is commands and replies. This is the same idea pointed at Varnox's own
+ * bots: a chat where `/newbot` walks you through name, then username, then hands over the token.
  *
  * WHY THIS IS BETTER THAN A TELEGRAM BOT DOING IT
  *
  * The signed-in session is the account link. Anybody in Telegram could press START on a bot, but
  * only somebody already signed in to this account can open this page — so there is no way to
  * reach the credential-minting code without owning the account it mints for. The alternative, a
- * Telegram-side BotFather, would have needed its own account-linking step and would have put a
- * public "make me a token" surface on the internet.
+ * Telegram-side bot, would have needed its own account-linking step and would have put a public
+ * "make me a token" surface on the internet.
  *
  * WHAT THIS COMPONENT IS AND IS NOT
  *
@@ -87,7 +87,7 @@ const HELP = [
 
 function greeting(username: string): string {
   return [
-    `I'm the Varnox BotFather. I create and manage the bots on @${username}.`,
+    `I'm the Varnox Support Bot. I create and manage the bots on @${username}.`,
     '',
     HELP,
   ].join('\n');
@@ -104,7 +104,7 @@ function describeBot(bot: Bot): string {
   return `${parts.join(' · ')}\nCreated ${dateStamp(bot.createdAt)}`;
 }
 
-export function BotFather({ me }: { me: PublicUser }) {
+export function SupportBot({ me }: { me: PublicUser }) {
   const [lines, setLines] = useState<Line[]>(() => [
     { id: 0, from: 'father', text: greeting(me.username), at: 0 },
   ]);
@@ -352,7 +352,7 @@ export function BotFather({ me }: { me: PublicUser }) {
               (suggested
                 ? `How about @${suggested}? Send it back to accept it, or type your own.`
                 : 'Send me a username.') +
-              '\n\nLowercase letters, digits, - and _, 3–32 characters. It cannot be changed later.'
+              '\n\nLowercase letters, digits, - and _, ending in -bot or _bot, 5–32 characters. It cannot be changed later.'
           );
           return;
         }
@@ -401,7 +401,7 @@ export function BotFather({ me }: { me: PublicUser }) {
           <IconBack size={22} />
         </Link>
         <div>
-          <h1 className="bots-title">BotFather</h1>
+          <h1 className="bots-title">Varnox Support Bot</h1>
           <p className="hint">Create and manage your bots by talking to it.</p>
         </div>
         <span className="father-avatar" aria-hidden>
@@ -506,7 +506,7 @@ export function BotFather({ me }: { me: PublicUser }) {
               }
             }}
             placeholder={flow.kind === 'idle' ? 'Send a command, or /newbot' : 'Type your answer'}
-            aria-label="Message BotFather"
+            aria-label="Message the Varnox Support Bot"
             disabled={busy}
           />
         </div>
