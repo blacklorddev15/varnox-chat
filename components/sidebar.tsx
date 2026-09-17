@@ -15,6 +15,8 @@ import {
   IconChannel,
   IconChat,
   IconCheck,
+  IconChevron,
+  IconClose,
   IconDoc,
   IconDoubleCheck,
   IconExit,
@@ -202,7 +204,22 @@ export function Sidebar({
             <IconMenu size={20} />
           </button>
           {menuOpen ? (
-            <div className="menu">
+            <div className="menu-quick">
+              {/* The panel is titled, in the app's serif italic — that heading is most of what
+                  makes the reference recognisable. The close button earns its place because the
+                  panel covers the chat list, and dismissing by tapping outside is not something
+                  a panel can advertise. */}
+              <div className="menu-head">
+                <span className="menu-title">Quick Menu</span>
+                <button
+                  type="button"
+                  className="menu-close"
+                  title="Close"
+                  onClick={() => setMenuOpen(false)}
+                >
+                  <IconClose size={18} />
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={() => {
@@ -210,7 +227,9 @@ export function Sidebar({
                   onNewGroup();
                 }}
               >
-                <IconGroup size={18} /> New group
+                <IconGroup size={18} className="menu-ic" />
+                <span className="menu-label">New group</span>
+                <IconChevron size={16} className="menu-chev" />
               </button>
               <button
                 type="button"
@@ -219,7 +238,9 @@ export function Sidebar({
                   onStarred();
                 }}
               >
-                <IconStar size={18} /> Starred messages
+                <IconStar size={18} className="menu-ic" />
+                <span className="menu-label">Starred messages</span>
+                <IconChevron size={16} className="menu-chev" />
               </button>
               <button
                 type="button"
@@ -228,7 +249,9 @@ export function Sidebar({
                   onSearch();
                 }}
               >
-                <IconSearch size={18} /> Search messages
+                <IconSearch size={18} className="menu-ic" />
+                <span className="menu-label">Search messages</span>
+                <IconChevron size={16} className="menu-chev" />
               </button>
               <button
                 type="button"
@@ -238,7 +261,9 @@ export function Sidebar({
                   setMenuOpen(false);
                 }}
               >
-                <IconPin size={18} /> Join with invite code
+                <IconPin size={18} className="menu-ic" />
+                <span className="menu-label">Join with invite code</span>
+                <IconChevron size={16} className="menu-chev" />
               </button>
               {/* A destination rather than an action, so it sits with Settings and My profile
                   below the separator rather than above it. A Link and not a button because it
@@ -246,10 +271,14 @@ export function Sidebar({
                   the back gesture keep working — which a client-side panel swap would not. */}
               <div className="sep" />
               <Link href="/bots" onClick={() => setMenuOpen(false)}>
-                <IconBot size={18} /> Bots
+                <IconBot size={18} className="menu-ic" />
+                <span className="menu-label">Bots</span>
+                <IconChevron size={16} className="menu-chev" />
               </Link>
               <Link href="/bots/support" onClick={() => setMenuOpen(false)}>
-                <IconBot size={18} /> Support bot
+                <IconBot size={18} className="menu-ic" />
+                <span className="menu-label">Support bot</span>
+                <IconChevron size={16} className="menu-chev" />
               </Link>
               <div className="sep" />
               <button
@@ -259,7 +288,9 @@ export function Sidebar({
                   onSettings();
                 }}
               >
-                <IconSettings size={18} /> Settings
+                <IconSettings size={18} className="menu-ic" />
+                <span className="menu-label">Settings</span>
+                <IconChevron size={16} className="menu-chev" />
               </button>
               <button
                 type="button"
@@ -268,7 +299,9 @@ export function Sidebar({
                   onProfile();
                 }}
               >
-                <Avatar name={me.displayName} src={me.avatar} size={20} /> My profile
+                <Avatar name={me.displayName} src={me.avatar} size={20} />
+                <span className="menu-label">My profile</span>
+                <IconChevron size={16} className="menu-chev" />
               </button>
               <div className="sep" />
               <button
@@ -278,7 +311,9 @@ export function Sidebar({
                   onSignOut();
                 }}
               >
-                <IconExit size={18} /> Sign out
+                <IconExit size={18} className="menu-ic" />
+                <span className="menu-label">Sign out</span>
+                <IconChevron size={16} className="menu-chev" />
               </button>
             </div>
           ) : null}

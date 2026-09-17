@@ -45,6 +45,9 @@
   --on-brand: #1a1408;
   --tick-read: #ffd166;
   --danger: #f15c6d;
+  /* The one green in the app. It was inline on the presence dot; it is a token now so a
+     value can borrow it rather than repeat the hex. */
+  --value: #31d158;
   --radius: 8px;
   --sidebar-w: 30%;
   --sidebar-min: 340px;
@@ -88,6 +91,9 @@ html[data-theme='light'] {
   --shadow-lg: 0 12px 32px rgba(84, 63, 22, 0.24);
   --badge-text: var(--on-brand);
   --tick-read: #8a6410;
+  /* Bright green on cream is about 2:1, so a value set in it would be unreadable. Same
+     problem as the gold, and the same answer: the ramp comes down at this end. */
+  --value: #1f7a37;
 }
 
 html[data-theme='dark'] {
@@ -488,7 +494,7 @@ html[data-theme='dark'] .chat-item-time.unread {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #31d158;
+  background: var(--value);
   border: 2px solid var(--panel);
 }
 
@@ -1923,6 +1929,111 @@ html[data-theme='dark'] .switch-line button {
 
 .back-btn {
   display: none;
+}
+
+/* ==========================================================================
+   The sidebar's quick menu
+
+   The gold language applied to a titled panel: near-black, a thin gold outline, a serif
+   italic heading, and rows that are cards in miniature — a gold glyph, the label, and the
+   chevron the reference puts on every row.
+
+   Its own class rather than a modifier on .menu, because .menu is shared with the
+   leave-channel button and the per-message menu. Both are single-button panels that want
+   none of this, so leaving .menu untouched leaves those two exactly as they were.
+   ========================================================================== */
+
+.menu-quick {
+  position: absolute;
+  top: 50px;
+  right: 10px;
+  min-width: 250px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+  padding: 10px;
+  z-index: 20;
+}
+
+/* The title row. The close button earns its place: the panel covers the chat list, and
+   dismissing by tapping outside is not something a panel can advertise. */
+.menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 4px 6px;
+}
+.menu-title {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 19px;
+  color: var(--gold-bright);
+}
+.menu-close {
+  display: inline-flex;
+  padding: 4px;
+  border-radius: 8px;
+  color: var(--muted);
+}
+.menu-close:hover {
+  background: var(--hover);
+  color: var(--gold-bright);
+}
+
+/* Direct children only: the close button is a <button> too, and would otherwise inherit the
+   whole row treatment — full width, a border, row padding. */
+.menu-quick > button,
+.menu-quick > a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  text-align: left;
+  color: var(--text);
+  font-size: 14.6px;
+  text-decoration: none;
+}
+.menu-quick > button:hover,
+.menu-quick > a:hover {
+  border-color: var(--line-strong);
+  background: var(--hover);
+}
+/* The leading glyph is the gold one. The chevron is a direction rather than a thing to
+   read, so it stays muted. */
+.menu-ic {
+  flex: none;
+  color: var(--brand);
+}
+html[data-theme='dark'] .menu-ic {
+  color: var(--gold-bright);
+}
+.menu-label {
+  flex: 1;
+  min-width: 0;
+}
+.menu-chev {
+  flex: none;
+  color: var(--muted);
+}
+/* A value — the reference's "(0.00 SD)" — in the green the app keeps for presence. Tabular
+   figures so a column of them would line up. */
+.menu-value {
+  flex: none;
+  color: var(--value);
+  font-variant-numeric: tabular-nums;
+}
+.menu-quick .sep {
+  height: 1px;
+  background: var(--line);
+  margin: 2px 4px;
 }
 
 @media (max-width: 1000px) {
