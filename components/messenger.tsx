@@ -1100,7 +1100,7 @@ export function Messenger({
         Greets an account with no conversations yet. Waits for the list to have loaded, so it
         cannot flash over an existing user whose chats simply have not arrived.
       */}
-      {listReady && chats.length === 0 ? <WelcomeOverlay name={me.displayName} /> : null}
+      {listReady && chats.length === 0 ? <WelcomeOverlay /> : null}
 
       {panel === 'forward' ? (
         <ForwardPanel chats={chats} onClose={() => setPanel(null)} onForward={doForward} />

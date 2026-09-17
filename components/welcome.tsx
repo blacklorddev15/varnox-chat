@@ -18,10 +18,20 @@ export function Welcome() {
   return (
     <div className="auth-wrap">
       <div className="auth-card">
-        <h1>Varnox</h1>
+        {/*
+          The greeting is the heading now, and the brand is set inside it rather than above it as a
+          separate wordmark. Stacking "Varnox" and then "Welcome to Varnox App" made the screen say
+          the same word twice in a row, and the second time said it better.
+        */}
+        <h1 className="welcome-title">
+          Welcome to <span className="welcome-brand">Varnox App</span>.
+        </h1>
         <p className="sub">
-          A small messaging app you run on your own server. Your messages stay on it — not shared
-          with any other messenger.
+          A place to make friends. Nothing
+          <br />
+          sold, nothing shared — kept private.
+          <br />
+          Talk to people worth talking to.
         </p>
 
         {/* Straight into registration, which is the only thing this screen offers. The mode

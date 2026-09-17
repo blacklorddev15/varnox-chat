@@ -4083,20 +4083,30 @@ html[data-theme='dark'] .bots-field > label {
   object-position: 50% 28%;
   border: 2px solid var(--gold-edge);
 }
-.welcome-kicker {
-  margin: 14px 0 0;
-  color: var(--gold-bright);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-.welcome-card h2 {
-  margin: 2px 0 10px;
+/* The greeting, which is now also the heading and the wordmark's job. */
+.welcome-title {
+  margin: 14px 0 10px;
   font-family: var(--font-display);
   font-style: italic;
   font-size: 25px;
   font-weight: 600;
+  color: var(--text);
+}
+
+/*
+  "VARNOX APP" inside the greeting: the brand set the way a wordmark is rather than the way a
+  sentence is — upper case, tracked out, and in the bright gold used for headings.
+  
+  Written in sentence case in the markup and upper-cased here, so the source stays readable and
+  this treatment lives in one place rather than being re-typed at each call site. Upright rather
+  than italic, because the heading is italic and leaning capitals look like a mistake.
+*/
+.welcome-brand {
+  color: var(--gold-bright);
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 .welcome-line {
   margin: 0 0 18px;

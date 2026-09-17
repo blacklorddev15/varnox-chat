@@ -19,7 +19,7 @@ const DISMISSED_KEY = 'varnox:welcome-dismissed';
  * statement all moving together — worth doing if this should be strictly once-ever, but an empty
  * list is the honest condition for wanting to say hello, and it needs none of that.
  */
-export function WelcomeOverlay({ name }: { name?: string }) {
+export function WelcomeOverlay() {
   const [gone, setGone] = useState(() => {
     if (typeof window === 'undefined') return false;
     try {
@@ -41,11 +41,19 @@ export function WelcomeOverlay({ name }: { name?: string }) {
           filename or a guess at its contents in front of the actual message.
         */}
         <img className="welcome-face" src="/welcome.jpg" alt="" width={88} height={88} />
-        <p className="welcome-kicker">Welcome to</p>
-        <h2 id="welcome-title">Varnox</h2>
+        {/*
+          The kicker and the wordmark are gone. The greeting says "welcome" and names the app, so
+          the card used to say both of those twice before reaching the sentence that mattered.
+        */}
+        <h2 id="welcome-title" className="welcome-title">
+          Welcome to <span className="welcome-brand">Varnox App</span>.
+        </h2>
         <p className="welcome-line">
-          This is a place to make friends{name ? `, ${name}` : ''}. Talk about nothing in particular,
-          find people who get you, and keep the ones worth keeping.
+          A place to make friends. Nothing
+          <br />
+          sold, nothing shared — kept private.
+          <br />
+          Talk to people worth talking to.
         </p>
         <button
           className="btn"
