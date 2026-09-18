@@ -1684,6 +1684,18 @@ html[data-theme='dark'] .tag {
   text-align: left;
   font-size: 15.4px;
 }
+/*
+  A settings row that happens to be an anchor.
+
+  Rows are buttons when they switch a section and links when they leave the page, and the difference
+  was visible: a link carries an underline that a button does not, so the Bots, Support and Admin
+  rows did not match the rows directly above and below them. It is the same fault as a.btn, sitting
+  one rule away from it — the same control written with two different elements.
+*/
+a.settings-row {
+  text-decoration: none;
+  color: inherit;
+}
 .settings-row:hover {
   background: var(--hover);
 }
@@ -1749,10 +1761,6 @@ html[data-theme='dark'] .tag {
   background: var(--panel-3);
   color: var(--muted);
   font-size: 13.4px;
-}
-.seg.on {
-  background: var(--brand);
-  color: var(--on-brand);
 }
 
 .wall-grid {
@@ -3286,15 +3294,28 @@ html[data-theme='dark'] .chat-bg-pattern {
 /* Four ── the gold wash, for chips, the unread badge and the selected segment. */
 .badge,
 .chip,
+/*
+  A selected segment has to be answerable at a glance, and it was not: this was a faint tint behind
+  muted-gold text, which is nearly what an unselected one looked like. The border carries the
+  state — the bright gold rather than the muted line — so the row reads as a choice with one answer
+  rather than a row of labels.
+*/
 .seg.on {
   background: var(--gold-tint);
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--gold-bright);
   color: var(--gold-bright);
+  font-weight: 600;
 }
 /* Transparent rather than absent, so choosing a segment does not resize it by the width of
    the border that appears. */
+/* Transparent rather than absent, so choosing an option does not shift the row by a pixel. */
 .seg {
   border: 1px solid transparent;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.seg:hover:not(.on) {
+  border-color: var(--line-strong);
+  color: var(--text);
 }
 
 /* The reference draws its tiles as outlined squares with a gold glyph, so the attachment
