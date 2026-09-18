@@ -1332,9 +1332,37 @@ html[data-theme='dark'] .sel-bar {
   background: var(--hover);
   color: var(--brand-strong);
 }
+/*
+ * The panel's search field, which had exactly the bug the picker caption had: this class is
+ * applied straight to the <input>, and it only ever set layout. Nothing gave it a background, so
+ * it kept the browser's white one while inheriting --text — #fafafa in the dark theme — making it
+ * a search box you could type into and not read. Same treatment, drawn in full, background
+ * included.
+ */
 .emoji-search {
   flex: none;
   margin: 0 10px 6px;
+  height: 42px;
+  padding: 0 16px;
+  border-radius: 12px;
+  background: var(--panel-3);
+  border: 1px solid var(--line);
+  color: var(--text);
+  caret-color: var(--brand);
+  font-size: 15px;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.emoji-search::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+.emoji-search:focus {
+  border-color: var(--brand);
+  background: var(--panel-4);
+  box-shadow: 0 0 0 3px var(--brand-soft);
 }
 .emoji-body {
   flex: 1;
@@ -1502,9 +1530,44 @@ html[data-theme='dark'] .sel-bar {
   padding: 10px 12px;
   border-top: 1px solid var(--line);
 }
+/*
+ * The caption field, drawn rather than left to the browser.
+ *
+ * The only rule that used to touch this was `input, textarea { color: inherit }`, which inherits
+ * --text — #fafafa in the dark theme. An <input> that is never given a background keeps the
+ * browser's own white one, so in dark mode the caption was near-white text on white: you could
+ * type a whole caption and see none of it. Every property the field depends on is therefore set
+ * here, background included, so it cannot be left invisible by a theme again.
+ *
+ * Shaped as a pill to match the composer's field and the emoji segments, with the gold focus
+ * ring the brand already uses for emphasis.
+ */
 .picker-caption {
   flex: 1;
   min-width: 0;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: var(--panel-3);
+  border: 1px solid var(--line);
+  color: var(--text);
+  caret-color: var(--brand);
+  font-size: 15px;
+  line-height: 1.3;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.picker-caption::placeholder {
+  /* Set explicitly too: an unstyled placeholder defaults to a light grey that disappears
+     against the dark panel. */
+  color: var(--muted);
+  opacity: 1;
+}
+.picker-caption:focus {
+  border-color: var(--brand);
+  background: var(--panel-4);
+  box-shadow: 0 0 0 3px var(--brand-soft);
 }
 
 /* Pictures already sent in this chat, offered as a strip inside the attachment sheet. */
