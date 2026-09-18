@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { relativeTime } from '@/lib/format';
 import type {
   PrivacyWho,
   PublicUser,
@@ -13,8 +14,10 @@ import { post } from '@/lib/client';
 import { formatPhone } from '@/lib/phone';
 import {
   enableNativeNotifications,
+  nativeNotificationDiagnostics,
   nativeNotificationsAvailable,
   setNativeNotifications,
+  type NotificationDiagnostics,
 } from '@/lib/native-notifications';
 import { Avatar } from './avatar';
 import { IconBack, IconBell, IconBlock, IconBot, IconChat, IconLink, IconLock, IconPalette, IconStar, IconTrash, IconUser, IconWhatsApp } from './icons';
@@ -38,6 +41,48 @@ const STATUS_WHO: { id: StatusPrivacyWho; label: string }[] = [
   { id: 'everyone', label: 'Everyone' },
   { id: 'chats', label: 'My chats' },
 ];
+
+/**
+ * Whether the background connection is really working, as the shell sees it.
+ *
+ * Only says anything inside the app, where notifications are a foreground service rather than a
+ * browser permission — and where failure is invisible from the outside. A shell that is running
+ * but delivering nothing draws the same screen as nobody having messaged, which is why this is
+ * here rather than in a log: the person who is not receiving notifications is the one who can
+ * see which step failed.
+ *
+ * Read every ten seconds while the section is open, and not at all otherwise. The state it shows
+ * changes when messages are fetched, so a stale reading would be worse than none.
+ */
+function NotificationHealth() {
+  const [state, setState] = useState<NotificationDiagnostics | null>(null);
+
+  useEffect(() => {
+    const read = () => setState((prev) => nativeNotificationDiagnostics() ?? prev);
+    read();
+    const id = window.setInterval(read, 10_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // No shell to ask, so nothing to say — a browser tab manages its own notifications.
+  if (!state) return null;
+
+  const line = !state.permitted
+    ? 'Android refused notification permission, so nothing can be shown. Switch this off and on again to be asked.'
+    : !state.running
+      ? 'The background connection is not running. Switch this off and on again to restart it.'
+      : state.problem
+        ? `Running, but not delivering: ${state.problem}.`
+        : state.chats >= 0
+          ? `Working — last checked ${relativeTime(state.lastPollAt)}, ${state.chats} conversation${state.chats === 1 ? '' : 's'} seen.`
+          : 'Running. Waiting for the first check.';
+
+  return (
+    <p className="hint" style={{ padding: '0 22px' }}>
+      {line}
+    </p>
+  );
+}
 
 export function SettingsScreen({
   me,
@@ -503,15 +548,22 @@ export function SettingsScreen({
             >
               <span className="txt">
                 Show notifications
+                {/* Worded for where it is running. A background tab and a closed app are
+                    different promises, and the browser wording was being shown in the app. */}
                 <small>
-                  Alerts and a chime when a message arrives while Varnox is in a background tab.
+                  {nativeNotificationsAvailable()
+                    ? 'A notification when a message arrives, even once the app is closed.'
+                    : 'Alerts and a chime when a message arrives while Varnox is in a background tab.'}
                 </small>
               </span>
               <span className={`switch${settings.notifications ? ' on' : ''}`} />
             </button>
             <p className="hint" style={{ padding: '0 22px' }}>
-              Your browser asks for permission the first time you switch this on.
+              {nativeNotificationsAvailable()
+                ? 'Android asks for permission the first time you switch this on.'
+                : 'Your browser asks for permission the first time you switch this on.'}
             </p>
+            <NotificationHealth />
           </div>
         ) : null}
 

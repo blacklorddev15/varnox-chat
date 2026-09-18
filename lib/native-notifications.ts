@@ -16,6 +16,17 @@ type NativeBridge = {
   notificationsSupported?: () => boolean;
   notificationsEnabled?: () => boolean;
   setNotifications?: (enabled: boolean) => void;
+  notificationDiagnostics?: () => string;
+};
+
+/** What the shell reports about the background connection, as far as it is willing to say. */
+export type NotificationDiagnostics = {
+  wanted: boolean;
+  permitted: boolean;
+  running: boolean;
+  chats: number;
+  lastPollAt: number;
+  problem: string | null;
 };
 
 function bridge(): NativeBridge | null {
@@ -45,6 +56,36 @@ export function nativeNotificationsEnabled(): boolean {
     return native.notificationsEnabled() === true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * What the shell says about the background connection, or null outside the app.
+ *
+ * Exists so that "I never get notifications" has an answer instead of a list of suspects. The
+ * service can be running and still delivering nothing — a session it cannot read, a server that
+ * did not answer — and in that state the phone looks exactly like nobody has messaged. Each field
+ * is one step that has to succeed, so whichever is false is the one to look at.
+ */
+export function nativeNotificationDiagnostics(): NotificationDiagnostics | null {
+  const native = bridge();
+  if (typeof native?.notificationDiagnostics !== 'function') return null;
+  try {
+    const raw = native.notificationDiagnostics();
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<NotificationDiagnostics>;
+    return {
+      wanted: parsed.wanted === true,
+      permitted: parsed.permitted === true,
+      running: parsed.running === true,
+      chats: typeof parsed.chats === 'number' ? parsed.chats : -1,
+      lastPollAt: typeof parsed.lastPollAt === 'number' ? parsed.lastPollAt : 0,
+      problem: typeof parsed.problem === 'string' ? parsed.problem : null,
+    };
+  } catch {
+    // An older shell without this method, or a reply that is not the shape expected. Either way
+    // there is nothing to show, and nothing here is worth interrupting the screen over.
+    return null;
   }
 }
 
