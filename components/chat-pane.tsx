@@ -6,6 +6,7 @@ import { dayLabel, presence, timeOfDay } from '@/lib/format';
 import { formatPhone } from '@/lib/phone';
 import { api, post } from '@/lib/client';
 import { Avatar } from './avatar';
+import { ConfirmButton } from './confirm-button';
 import { Composer, type Outgoing } from './composer';
 import { VoiceNote } from './voice';
 import type { ReplyDraft } from './messenger';
@@ -876,16 +877,17 @@ export function ChatPane({
                           >
                             <IconEdit size={17} /> Edit
                           </button>
-                          <button
-                            type="button"
+                          <ConfirmButton
                             style={{ color: 'var(--danger)' }}
-                            onClick={() => {
+                            question="Delete this message for everyone?"
+                            confirmLabel="Delete"
+                            onConfirm={() => {
                               onDelete(msg);
                               setMenuFor(null);
                             }}
                           >
                             <IconTrash size={17} /> Delete for everyone
-                          </button>
+                          </ConfirmButton>
                         </>
                       ) : null}
                       <div className="sep" />

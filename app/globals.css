@@ -1947,6 +1947,26 @@ html[data-theme='dark'] .tag {
   letter-spacing: 0.01em;
 }
 
+/* A destructive action that has been asked for once and is waiting to be asked again.
+   Wraps rather than shrinks: the question is the part that has to stay readable, and on a narrow
+   phone it will not fit on one line with two buttons beside it. */
+.confirm-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--gold-edge);
+  border-radius: var(--radius);
+  background: var(--panel-4);
+}
+
+.confirm-ask .confirm-q {
+  flex: 1 1 100%;
+  color: var(--text);
+  font-size: 13px;
+}
+
 /* A message that arrived while this screen was open.
    Fixed to the top and above the offline banner, because a message arriving is the more urgent of
    the two and this one is only there for a few seconds. Tappable across its whole width: the

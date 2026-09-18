@@ -6,6 +6,7 @@ import type { ChatRow, Device, PublicUser, WhatsAppPairing, WhatsAppSession } fr
 import { presence, relativeTime } from '@/lib/format';
 import { formatPhone } from '@/lib/phone';
 import { Avatar } from './avatar';
+import { ConfirmButton } from './confirm-button';
 import { MediaGallery } from './overlays';
 import { IconBack, IconCheck, IconClock, IconClose, IconLink, IconSearch } from './icons';
 
@@ -1111,9 +1112,18 @@ export function ChatInfoPanel({
         ) : chat.peer ? (
           <ReportBlock kind="user" targetId={chat.peer.id} />
         ) : null}
-        <button type="button" className="btn danger" onClick={() => onLeave(chat.id)}>
+        <ConfirmButton
+          className="btn danger"
+          question={
+            isGroup
+              ? 'Leave this group? You will stop receiving its messages.'
+              : 'Delete this chat? It disappears from your list, and this cannot be undone.'
+          }
+          confirmLabel={isGroup ? 'Leave group' : 'Delete chat'}
+          onConfirm={() => onLeave(chat.id)}
+        >
           {isGroup ? 'Leave group' : 'Delete chat'}
-        </button>
+        </ConfirmButton>
       </div>
     </Sheet>
   );
