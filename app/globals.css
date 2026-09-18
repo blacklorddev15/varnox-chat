@@ -582,6 +582,15 @@ html[data-theme='dark'] .chat-pane[data-wall='leaf'] .chat-bg-pattern {
   color: var(--header-text);
   flex: none;
   z-index: 4;
+  /* The header's overflow menu is absolutely positioned against this. */
+  position: relative;
+}
+
+/* Takes the tap that closes the header menu without dimming the chat behind it. */
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 19;
 }
 .chat-header .who {
   flex: 1;
@@ -1062,8 +1071,32 @@ html[data-theme='light'] .composer {
   display: flex;
   align-items: flex-end;
   background: var(--panel);
-  border-radius: 9px;
-  padding: 8px 12px;
+  border-radius: 22px;
+  padding: 8px 8px 8px 12px;
+}
+
+/* The emoji button, the field and the trailing icons all live inside the pill, so the input
+   reads as one rounded control with the microphone as a separate round button beside it.
+   The row wraps the textarea rather than replacing the column, because the reply preview sits
+   above it and needs the full width. */
+.composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 100%;
+}
+.composer-row > .icon-btn {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--muted);
+}
+.composer-row > .icon-btn.on {
+  color: var(--brand-strong);
 }
 html[data-theme='dark'] .composer .field {
   background: var(--panel-4);

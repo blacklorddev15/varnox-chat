@@ -394,36 +394,6 @@ export function Composer({
       ) : null}
 
       <div className="composer">
-        <button
-          type="button"
-          className={`icon-btn${emoji ? ' on' : ''}`}
-          title="Emoji"
-          onClick={() => {
-            setEmoji((v) => !v);
-            closeSheet();
-          }}
-        >
-          <IconEmoji />
-        </button>
-
-        <button
-          type="button"
-          className={`icon-btn${attachOpen ? ' on' : ''}`}
-          title="Attach"
-          onClick={() => (attachOpen ? closeSheet() : openSheet())}
-        >
-          <IconAttach />
-        </button>
-
-        <button
-          type="button"
-          className={`icon-btn${viewOnce ? ' on' : ''}`}
-          title="View once"
-          onClick={() => setViewOnce((v) => !v)}
-        >
-          {onceBadge}
-        </button>
-
         <input
           ref={imageRef}
           type="file"
@@ -493,22 +463,68 @@ export function Composer({
               </button>
             </div>
           ) : null}
-          <textarea
-            ref={areaRef}
-            rows={1}
-            value={text}
-            placeholder="Type a message"
-            onChange={(e) => {
-              setText(e.target.value);
-              onTyping();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-          />
+          {/* Everything except the microphone sits inside the pill: emoji on the left, the
+              field in the middle, and the trailing icons hard right. The mic stays outside as
+              its own round button, which is what gives the bar its shape. */}
+          <div className="composer-row">
+            <button
+              type="button"
+              className={`icon-btn${emoji ? ' on' : ''}`}
+              title="Emoji"
+              onClick={() => {
+                setEmoji((v) => !v);
+                closeSheet();
+              }}
+            >
+              <IconEmoji />
+            </button>
+
+            <textarea
+              ref={areaRef}
+              rows={1}
+              value={text}
+              placeholder="Message"
+              onChange={(e) => {
+                setText(e.target.value);
+                onTyping();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+            />
+
+            <button
+              type="button"
+              className={`icon-btn${viewOnce ? ' on' : ''}`}
+              title="View once"
+              onClick={() => setViewOnce((v) => !v)}
+            >
+              {onceBadge}
+            </button>
+
+            <button
+              type="button"
+              className={`icon-btn${attachOpen ? ' on' : ''}`}
+              title="Attach"
+              onClick={() => (attachOpen ? closeSheet() : openSheet())}
+            >
+              <IconAttach />
+            </button>
+
+            {/* Straight to the camera, skipping the sheet. The sheet still has a Camera tile for
+                when the input is already open. */}
+            <button
+              type="button"
+              className="icon-btn"
+              title="Camera"
+              onClick={() => cameraRef.current?.click()}
+            >
+              <IconCamera />
+            </button>
+          </div>
         </div>
 
         {text.trim() || image || file ? (

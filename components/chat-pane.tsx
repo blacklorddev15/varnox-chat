@@ -22,6 +22,7 @@ import {
   IconGroup,
   IconInfo,
   IconLogo,
+  IconMenu,
   IconMoon,
   IconPhone,
   IconReply,
@@ -275,6 +276,7 @@ export function ChatPane({
   const [onceBusy, setOnceBusy] = useState('');
   const [infoFor, setInfoFor] = useState<Message | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [searchQ, setSearchQ] = useState('');
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -372,30 +374,63 @@ export function ChatPane({
           <h2>{chat.title}</h2>
           <span style={typingNames.length ? { color: '#6ee0bc' } : undefined}>{subtitle}</span>
         </button>
-        {onVoiceCall ? (
-          <button type="button" className="header-btn" title="Voice call" onClick={onVoiceCall}>
-            <IconPhone size={20} />
-          </button>
-        ) : null}
         {onVideoCall ? (
           <button type="button" className="header-btn" title="Video call" onClick={onVideoCall}>
             <IconVideoCall size={20} />
           </button>
         ) : null}
+        {onVoiceCall ? (
+          <button type="button" className="header-btn" title="Voice call" onClick={onVoiceCall}>
+            <IconPhone size={20} />
+          </button>
+        ) : null}
         <button
           type="button"
           className="header-btn"
-          title="Search in chat"
-          onClick={() => {
-            setSearchOpen((v) => !v);
-            setSearchQ('');
-          }}
+          title="More"
+          onClick={() => setMenuOpen((v) => !v)}
         >
-          <IconSearch size={20} />
+          <IconMenu size={20} />
         </button>
-        <button type="button" className="header-btn" title="Theme" onClick={onToggleTheme}>
-          {theme === 'dark' ? <IconSun size={20} /> : <IconMoon size={20} />}
-        </button>
+
+        {/* Search and the theme switch moved in here. Both still exist, they just no longer
+            take up header space next to the call buttons. The theme switch is also in the
+            sidebar, so nothing is only reachable from this menu. */}
+        {menuOpen ? (
+          <>
+            <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />
+            <div className="menu" style={{ top: 'calc(var(--header-h) - 8px)', right: 8, minWidth: 200 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setSearchOpen(true);
+                  setSearchQ('');
+                }}
+              >
+                <IconSearch size={17} /> Search in chat
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onOpenInfo();
+                }}
+              >
+                <IconInfo size={17} /> Chat info
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onToggleTheme();
+                }}
+              >
+                {theme === 'dark' ? <IconSun size={17} /> : <IconMoon size={17} />} Theme
+              </button>
+            </div>
+          </>
+        ) : null}
       </header>
 
       {searchOpen ? (
