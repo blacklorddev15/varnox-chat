@@ -3895,6 +3895,9 @@ html[data-theme='dark'] .bubble.tail-out {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  /* Lets the suspend form drop onto a line of its own instead of being squeezed in beside the
+     name. With nothing extra to wrap, the two children sit exactly as they did before. */
+  flex-wrap: wrap;
   gap: 12px;
   padding: 11px 0;
   border-bottom: 1px solid var(--line);
@@ -3907,6 +3910,26 @@ html[data-theme='dark'] .bubble.tail-out {
   flex: 0 0 auto;
   display: flex;
   gap: 6px;
+}
+/* The suspend form: a length, a note, and the two buttons, wrapping rather than squeezing. */
+.admin-suspend {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding-top: 2px;
+}
+/* A select keeps the platform's own text colour unless it is told otherwise, which is how a
+   control ends up unreadable in one theme and perfectly fine in the other. */
+.admin-suspend select.input,
+.admin-suspend input.input {
+  color: var(--text);
+}
+.admin-suspend select.input {
+  flex: 0 0 auto;
+  min-width: 160px;
+  cursor: pointer;
 }
 .admin-name {
   font-size: 14px;

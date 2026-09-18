@@ -805,6 +805,13 @@ alter table vx_users
 alter table vx_users
   add column if not exists review_requested_at bigint;
 
+-- When a suspension the owner gave a length to lifts on its own, or null for one with no end.
+-- Null is every suspension that existed before a length could be chosen, which is exactly right —
+-- those have no end, and the appeal ladder still governs them. A row with a date here ignores the
+-- ladder entirely, so the two mechanisms never both apply to the same person.
+alter table vx_users
+  add column if not exists suspend_until bigint;
+
 
 -- ── owner actions ───────────────────────────────────────────────────────────
 --

@@ -3523,8 +3523,12 @@ export async function isAccountDeleted(userId: string): Promise<boolean> {
  * Not cached, for the reason getSuspension gives.
  */
 export async function isAccountSuspended(userId: string): Promise<boolean> {
-  const rows = await q<{ suspended_at: number | null; review_requested_at: number | null }>(
-    `select suspended_at, review_requested_at from vx_users where id = $1`,
+  const rows = await q<{
+    suspended_at: number | null;
+    review_requested_at: number | null;
+    suspend_until: number | null;
+  }>(
+    `select suspended_at, review_requested_at, suspend_until from vx_users where id = $1`,
     [userId]
   );
   const row = rows[0];
@@ -3533,7 +3537,8 @@ export async function isAccountSuspended(userId: string): Promise<boolean> {
   return suspensionBlocksUse(
     suspensionState(
       row.suspended_at == null ? null : Number(row.suspended_at),
-      row.review_requested_at == null ? null : Number(row.review_requested_at)
+      row.review_requested_at == null ? null : Number(row.review_requested_at),
+      row.suspend_until == null ? null : Number(row.suspend_until)
     )
   );
 }
@@ -3617,18 +3622,37 @@ export async function getSuspension(userId: string): Promise<Suspension | null> 
     suspended_at: number | null;
     suspend_reason: string | null;
     review_requested_at: number | null;
+    suspend_until: number | null;
   }>(
-    `select suspended_at, suspend_reason, review_requested_at
+    `select suspended_at, suspend_reason, review_requested_at, suspend_until
        from vx_users
       where id = $1`,
     [userId]
   );
   const row = rows[0];
   if (!row || row.suspended_at == null) return null;
+
+  // A suspension whose date has passed is over, and reporting it as still in force would leave
+  // the row on the ban screen of somebody who is no longer banned. Cleared here, on the read
+  // that discovered it, rather than by a job — this deployment has no scheduler, and the whole
+  // design of the ladder is that the answer is right whenever it is asked.
+  const until = row.suspend_until == null ? null : Number(row.suspend_until);
+  if (until != null && !suspensionBlocksUse(suspensionState(Number(row.suspended_at), null, until))) {
+    await q(
+      `update vx_users
+          set suspended_at = null, suspend_reason = null, suspend_until = null,
+              review_requested_at = null
+        where id = $1 and suspended_at = $2`,
+      [userId, Number(row.suspended_at)]
+    );
+    return null;
+  }
+
   return {
     at: Number(row.suspended_at),
     reason: row.suspend_reason ?? null,
     reviewRequestedAt: row.review_requested_at == null ? null : Number(row.review_requested_at),
+    until,
   };
 }
 
@@ -3644,15 +3668,20 @@ export async function getSuspension(userId: string): Promise<Suspension | null> 
  *
  * Returns whether a row actually matched, never an unconditional true.
  */
-export async function suspendAccount(userId: string, reason: string | null): Promise<boolean> {
+export async function suspendAccount(
+  userId: string,
+  reason: string | null,
+  until: number | null = null
+): Promise<boolean> {
   const rows = await q<{ id: string }>(
     `update vx_users
         set suspended_at         = $2,
             suspend_reason       = $3,
+            suspend_until        = $4,
             review_requested_at  = null
       where id = $1 and deleted_at is null
       returning id`,
-    [userId, Date.now(), reason]
+    [userId, Date.now(), reason, until]
   );
   return rows.length > 0;
 }
@@ -3668,6 +3697,7 @@ export async function reinstateAccount(userId: string): Promise<boolean> {
     `update vx_users
         set suspended_at        = null,
             suspend_reason      = null,
+            suspend_until       = null,
             review_requested_at = null
       where id = $1 and suspended_at is not null
       returning id`,
@@ -3703,11 +3733,13 @@ export type AdminAccount = {
   email: string | null;
   createdAt: number;
   lastSeen: number;
-  suspendedAt: number | null;
-  suspendReason: string | null;
-  reviewRequestedAt: number | null;
-  deletedAt: number | null;
-};
+   suspendedAt: number | null;
+   suspendReason: string | null;
+   reviewRequestedAt: number | null;
+   /** When a timed suspension lifts, or null for one with no end. */
+   suspendUntil: number | null;
+   deletedAt: number | null;
+ };
 
 /**
  * The accounts the owner can act on, most recently suspended and reviewed first.
@@ -3733,10 +3765,11 @@ export async function listAccountsForAdmin(
     suspended_at: number | null;
     suspend_reason: string | null;
     review_requested_at: number | null;
+    suspend_until: number | null;
     deleted_at: number | null;
   }>(
     `select id, username, display_name, phone, email, created_at, last_seen,
-            suspended_at, suspend_reason, review_requested_at, deleted_at
+            suspended_at, suspend_reason, review_requested_at, suspend_until, deleted_at
        from vx_users
       where deleted_at is null
         and ($1 = 'all' or suspended_at is not null)
@@ -3758,6 +3791,7 @@ export async function listAccountsForAdmin(
     suspendedAt: r.suspended_at == null ? null : Number(r.suspended_at),
     suspendReason: r.suspend_reason ?? null,
     reviewRequestedAt: r.review_requested_at == null ? null : Number(r.review_requested_at),
+    suspendUntil: r.suspend_until == null ? null : Number(r.suspend_until),
     deletedAt: r.deleted_at == null ? null : Number(r.deleted_at),
   }));
 }

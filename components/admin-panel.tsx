@@ -19,6 +19,27 @@ import type { AdminAuditEntry, AdminAccount, BlockedPhone, Report } from '@/lib/
  * route does, and `prompt` makes the typed value impossible to skip or pre-fill. A styled modal
  * would look better and be easier to mis-click.
  */
+/**
+ * The lengths a suspension can be given.
+ *
+ * Presets rather than a free number of hours. The useful answers here are few, and a mistyped
+ * duration is invisible at the moment it is made: a suspension meant to be a day but entered as
+ * a year looks exactly the same on the screen as the one intended. Picking from a short list
+ * removes that class of mistake rather than relying on the person to notice it.
+ *
+ * "Until I lift it" stays on the list, because it is what every suspension used to be — and for
+ * the cases where the answer genuinely is "I do not know yet", it is still the honest one. A
+ * suspension with no length keeps the appeal ladder it has always had; a timed one does not,
+ * since it already has an end the person can read.
+ */
+const SUSPEND_LENGTHS: { id: string; label: string; ms: number | null }[] = [
+  { id: '1h', label: '1 hour', ms: 60 * 60_000 },
+  { id: '24h', label: '24 hours', ms: 24 * 60 * 60_000 },
+  { id: '7d', label: '7 days', ms: 7 * 24 * 60 * 60_000 },
+  { id: '30d', label: '30 days', ms: 30 * 24 * 60 * 60_000 },
+  { id: 'open', label: 'Until I lift it', ms: null },
+];
+
 export function AdminPanel({
   me,
   accounts,
@@ -39,6 +60,10 @@ export function AdminPanel({
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [onlySuspended, setOnlySuspended] = useState(false);
+  /** Which account's suspend form is open, and what has been chosen in it. */
+  const [suspendFor, setSuspendFor] = useState<string | null>(null);
+  const [suspendLength, setSuspendLength] = useState('24h');
+  const [suspendReason, setSuspendReason] = useState('');
 
   async function run(
     key: string,
@@ -113,7 +138,18 @@ export function AdminPanel({
               </div>
               <div className="admin-meta">
                 {a.phone ? a.phone : 'no number'}
-                {a.suspendedAt ? ' · suspended' : ''}
+                {/* Formatted from the ISO string rather than with toLocaleString, because this
+                    row is rendered on the server before it is hydrated: a locale- or
+                    timezone-dependent string is the classic way to get a hydration mismatch.
+                    Spelled out as UTC so the value is unambiguous rather than merely stable. */}
+                {a.suspendedAt
+                  ? a.suspendUntil
+                    ? ` · suspended until ${new Date(a.suspendUntil)
+                        .toISOString()
+                        .slice(0, 16)
+                        .replace('T', ' ')} UTC`
+                    : ' · suspended'
+                  : ''}
                 {a.reviewRequestedAt ? ' · asked for review' : ''}
               </div>
               {a.suspendReason ? <div className="admin-why">{a.suspendReason}</div> : null}
@@ -139,15 +175,14 @@ export function AdminPanel({
                   className="btn ghost"
                   disabled={busy !== null}
                   onClick={() => {
-                    const reason = window.prompt(
-                      `Suspend @${a.username}?\n\nReason (shown to them, optional):`
-                    );
-                    // Cancelling must do nothing at all — an empty string is a deliberate
-                    // "no reason", which is allowed, but null means the prompt was dismissed.
-                    if (reason === null) return;
-                    void run(`s-${a.id}`, `Suspended @${a.username}.`, () =>
-                      post(`/api/admin/accounts/${a.id}/suspend`, { reason: reason.trim() })
-                    );
+                    // Opens a form rather than prompting. Suspending now has two things to
+                    // settle — how long, and why — and two prompts in a row read as one question
+                    // being asked twice, with no way to see the first answer while giving the
+                    // second. Closing it again is the same button, so nothing is left open by
+                    // accident.
+                    setSuspendReason('');
+                    setSuspendLength('24h');
+                    setSuspendFor((v) => (v === a.id ? null : a.id));
                   }}
                 >
                   Suspend
@@ -174,6 +209,68 @@ export function AdminPanel({
                 Delete
               </button>
             </div>
+
+            {suspendFor === a.id ? (
+              <div className="admin-suspend">
+                {/* The length is a select of presets rather than a free number of hours: a
+                    mistyped duration is invisible when it is made, and a suspension meant to be
+                    a day looks identical on screen to one intended to be a year. */}
+                <select
+                  className="input"
+                  aria-label={`How long to suspend @${a.username}`}
+                  value={suspendLength}
+                  onChange={(e) => setSuspendLength(e.target.value)}
+                >
+                  {SUSPEND_LENGTHS.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.label}
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  className="input"
+                  aria-label="Reason"
+                  placeholder="Reason (shown to them, optional)"
+                  value={suspendReason}
+                  onChange={(e) => setSuspendReason(e.target.value)}
+                />
+
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy !== null}
+                  onClick={() => {
+                    const chosen = SUSPEND_LENGTHS.find((l) => l.id === suspendLength);
+                    if (!chosen) return;
+                    setSuspendFor(null);
+                    void run(
+                      `s-${a.id}`,
+                      chosen.ms == null
+                        ? `Suspended @${a.username}.`
+                        : `Suspended @${a.username} for ${chosen.label}.`,
+                      () =>
+                        post(`/api/admin/accounts/${a.id}/suspend`, {
+                          reason: suspendReason.trim(),
+                          // The length, not a date: the server decides the moment it starts.
+                          durationMs: chosen.ms,
+                        })
+                    );
+                  }}
+                >
+                  Suspend
+                </button>
+
+                <button
+                  type="button"
+                  className="btn ghost"
+                  disabled={busy !== null}
+                  onClick={() => setSuspendFor(null)}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : null}
           </div>
         ))}
       </section>

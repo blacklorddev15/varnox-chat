@@ -25,14 +25,21 @@ export const APPEAL_CLEAR_MS = 7 * 24 * 60 * 60_000;
 export type SuspensionState =
   /** Never suspended — or suspended and since cleared. */
   | 'clear'
-  /** Suspended and not appealed. The account cannot be used, and will not be until they appeal. */
+  /**
+   * Suspended and not appealed. The account cannot be used, and will not be until they appeal —
+   * or until the end date, when the owner set one. While a timed suspension is running it reads
+   * as this, because the question this function answers is "is it blocked"; `until` on the
+   * suspension carries the date, so the two are not separate states.
+   */
   | 'banned'
   /** Appealed, and the wait is not over. Still cannot be used. */
   | 'waiting'
   /** Appealed and past the wait. Usable again, but the suspension still stands on the record. */
   | 'temporary'
   /** Appealed and past the week. No longer suspended at all. */
-  | 'restored';
+  | 'restored'
+  /** Suspended for a fixed period, and that period is over. The sentence has been served. */
+  | 'expired';
 
 /**
  * The rung of the ladder, given the two timestamps and the time now.
@@ -48,9 +55,25 @@ export type SuspensionState =
 export function suspensionState(
   suspendedAt: number | null,
   reviewAt: number | null,
+  until: number | null,
   now = Date.now()
 ): SuspensionState {
   if (suspendedAt == null) return 'clear';
+
+  /*
+   * An end date, when the owner set one, is the whole sentence.
+   *
+   * The ladder below exists only because "banned" has no end: with no date to read, an appeal is
+   * the single way out, so the ladder turns that appeal into a wait and then into a release. A
+   * suspension the owner gave a length to already has a way out that the person can see on the
+   * screen, and running the ladder on top of it would quietly shorten the period that was chosen
+   * — a thirty-day suspension that a five-hour appeal erases is not a thirty-day suspension.
+   *
+   * So the two do not mix, and the code says so rather than leaving it to be discovered: one or
+   * the other, decided by whether a date was set.
+   */
+  if (until != null) return now >= until ? 'expired' : 'banned';
+
   if (reviewAt == null) return 'banned';
 
   const waited = now - reviewAt;
@@ -73,11 +96,25 @@ export function suspensionBlocksUse(state: SuspensionState): boolean {
  * address on file.
  */
 export function suspensionNeedsFreshSignIn(state: SuspensionState): boolean {
-  return state === 'temporary' || state === 'restored';
+  // 'expired' belongs here for the same reason the appeal rungs do: the account is coming off a
+  // block, and that is the moment worth re-establishing that it is still the person holding it.
+  return state === 'temporary' || state === 'restored' || state === 'expired';
 }
 
-/** How long until the account becomes usable, for a screen that wants to say so. */
-export function msUntilUsable(reviewAt: number | null, now = Date.now()): number {
+/**
+ * How long until the account becomes usable, for a screen that wants to say so.
+ *
+ * Two clocks, because there are two ways a suspension ends. A dated one counts down to its date.
+ * An appealed one counts from the appeal, since that is when the wait began — a suspension with
+ * neither has no end to count towards at all, and reports zero rather than a number that would
+ * have to be made up.
+ */
+export function msUntilUsable(
+  reviewAt: number | null,
+  until: number | null,
+  now = Date.now()
+): number {
+  if (until != null) return Math.max(0, until - now);
   if (reviewAt == null) return 0;
   return Math.max(0, reviewAt + APPEAL_TEMPORARY_MS - now);
 }

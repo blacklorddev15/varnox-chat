@@ -36,9 +36,10 @@ export function SuspendedScreen({ suspension }: { suspension: Suspension }) {
     return () => window.clearInterval(id);
   }, []);
 
-  const state = suspensionState(suspension.at, sentAt, now);
+  const until = suspension.until;
+  const state = suspensionState(suspension.at, sentAt, until, now);
   const blocked = suspensionBlocksUse(state);
-  const waitLeft = msUntilUsable(sentAt, now);
+  const waitLeft = msUntilUsable(sentAt, until, now);
 
   async function askForReview() {
     setBusy(true);
@@ -76,8 +77,13 @@ export function SuspendedScreen({ suspension }: { suspension: Suspension }) {
           <div>
             <strong>This account can no longer use the Varnox app</strong>
             <span>
-              Access was withdrawn on {day(suspension.at)}. Nothing has been deleted: your chats,
-              your messages and your profile are all still here.
+              {until
+                ? `Access was withdrawn on ${day(suspension.at)} and returns on ${day(
+                    until
+                  )}. Nothing has been deleted: your chats, your messages and your profile are all still here.`
+                : `Access was withdrawn on ${day(
+                    suspension.at
+                  )}. Nothing has been deleted: your chats, your messages and your profile are all still here.`}
             </span>
           </div>
         </div>
@@ -96,27 +102,35 @@ export function SuspendedScreen({ suspension }: { suspension: Suspension }) {
           the least reason to trust it.
         */}
         <p className="hint">
-          If you think this was a mistake, ask for it to be reviewed. Access returns five hours
-          after you ask, and the suspension is dropped entirely a week after that.
+          {until
+            ? `This suspension has a set end, so there is nothing to ask for — access comes back on its own at the time above.`
+            : 'If you think this was a mistake, ask for it to be reviewed. Access returns five hours after you ask, and the suspension is dropped entirely a week after that.'}
         </p>
 
         <div className="suspend-actions">
-          {sentAt ? (
-            blocked ? (
+          {/* Restored first, because it is the one case where the useful thing on screen is the
+              way back in rather than an explanation of the wait. */}
+          {!blocked ? (
+            <>
               <p className="suspend-sent">
-                Review requested on {day(sentAt)}. Access returns in {duration(waitLeft)}.
+                Your access has been restored. Sign in again to carry on — coming back from a
+                suspension takes a fresh sign-in.
               </p>
-            ) : (
-              <>
-                <p className="suspend-sent">
-                  Your access has been restored. Sign in again to carry on — coming back from a
-                  suspension takes a fresh sign-in.
-                </p>
-                <button className="btn" onClick={signOut}>
-                  Sign in again
-                </button>
-              </>
-            )
+              <button className="btn" onClick={signOut}>
+                Sign in again
+              </button>
+            </>
+          ) : until ? (
+            /* No appeal button for a dated suspension. It would do nothing — the state machine
+               ignores appeals once a date is set — and offering a button that quietly does
+               nothing is worse than not offering it. */
+            <p className="suspend-sent">
+              Access returns on {day(until)} — in {duration(waitLeft)}.
+            </p>
+          ) : sentAt ? (
+            <p className="suspend-sent">
+              Review requested on {day(sentAt)}. Access returns in {duration(waitLeft)}.
+            </p>
           ) : (
             <button className="btn" onClick={askForReview} disabled={busy}>
               {busy ? 'Sending…' : 'Request review'}

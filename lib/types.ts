@@ -55,6 +55,14 @@ export type Suspension = {
   reason: string | null;
   /** When the account last asked for a review, or null if it never has. */
   reviewRequestedAt: number | null;
+  /**
+   * When the suspension lifts on its own, or null when it has no end.
+   *
+   * A date here means the owner chose a length and the account lifts by itself when it arrives —
+   * no appeal needed, and none will shorten it. Null is the older behaviour: blocked until
+   * somebody lifts it, with the appeal ladder as the way out.
+   */
+  until: number | null;
 };
 
 export type ConvType = 'direct' | 'group';

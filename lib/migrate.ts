@@ -476,6 +476,13 @@ export const STEPS: Step[] = [
     label: 'vx_users.review_requested_at',
     sql: `alter table vx_users add column if not exists review_requested_at bigint`,
   },
+  // When a suspension lifts on its own. Null is every suspension that existed before this column
+  // did, which is exactly right: those have no end, and the appeal ladder still governs them.
+  {
+    kind: 'column',
+    label: 'vx_users.suspend_until',
+    sql: `alter table vx_users add column if not exists suspend_until bigint`,
+  },
   {
     kind: 'table',
     label: 'vx_admin_audit',
