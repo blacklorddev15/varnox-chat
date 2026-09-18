@@ -1947,6 +1947,64 @@ html[data-theme='dark'] .tag {
   letter-spacing: 0.01em;
 }
 
+/* A message that arrived while this screen was open.
+   Fixed to the top and above the offline banner, because a message arriving is the more urgent of
+   the two and this one is only there for a few seconds. Tappable across its whole width: the
+   obvious thing to do with it is open the conversation, and a small target would make the one
+   useful action the hardest part. */
+.message-banner {
+  position: fixed;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  left: 12px;
+  right: 12px;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border: 1px solid var(--gold-edge);
+  border-radius: var(--radius);
+  background: var(--panel-4);
+  box-shadow: var(--shadow);
+  text-align: left;
+  cursor: pointer;
+  animation: banner-in 220ms ease-out;
+}
+
+.message-banner .who {
+  color: var(--gold-bright);
+  font-size: 12.6px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.message-banner .what {
+  color: var(--text);
+  font-size: 13.4px;
+  /* One line, because the banner is a glance rather than a reading surface — the conversation
+     itself is one tap away and holds the whole message. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes banner-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-banner {
+    animation: none;
+  }
+}
+
 /* ------------------------------------------------------------- settings */
 
 /* Settings is a page now, so it fills the chat column rather than the viewport: the sidebar

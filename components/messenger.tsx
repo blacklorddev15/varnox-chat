@@ -127,6 +127,38 @@ export function Messenger({
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [chats, setChats] = useState<ChatRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * Which conversation is open, readable from the poll without being one of its dependencies.
+   *
+   * The poll that notices a new message must not banner about the conversation already on screen,
+   * and it must not be rebuilt every time somebody opens a chat either — the same reasoning as
+   * paneOpenRef above, and the same shape.
+   */
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedId;
+
+  /**
+   * A message that arrived while this screen was being looked at.
+   *
+   * Everything the app did about an arriving message was gated behind the screen *not* being
+   * visible — deliberately, because the shell raises a real notification when it is not. The gap
+   * was the middle case: the screen is open, somebody is reading a different conversation, and
+   * nothing anywhere says a message has come in. That is what this is for.
+   */
+  const [incoming, setIncoming] = useState<{
+    chatId: string;
+    title: string;
+    body: string;
+  } | null>(null);
+  const bannerTimer = useRef<number | null>(null);
+  // The banner's own timer, cleared on the way out. A timeout that outlives the screen would call
+  // setState on something no longer mounted, which is harmless and still untidy.
+  useEffect(
+    () => () => {
+      if (bannerTimer.current !== null) window.clearTimeout(bannerTimer.current);
+    },
+    []
+  );
   const [messages, setMessages] = useState<Message[]>([]);
   const [reads, setReads] = useState<Record<string, number>>({});
   const [reactions, setReactions] = useState<Record<string, Record<string, string>>>({});
@@ -264,6 +296,26 @@ export function Messenger({
         }
       }
       firstListLoad.current = false;
+
+      /**
+       * A message that arrived while this screen was open.
+       *
+       * Not the conversation already on screen: that one is being read, and a banner over it
+       * would be telling somebody what they can see. Several at once report as the newest with a
+       * count, because a stack of banners is worse than one that says how many.
+       */
+      const whileWatching = fresh.filter((chat) => chat.id !== selectedIdRef.current);
+      if (whileWatching.length && document.visibilityState === 'visible') {
+        const newest = whileWatching[0];
+        const more = whileWatching.length - 1;
+        setIncoming({
+          chatId: newest.id,
+          title: newest.title,
+          body: (newest.last?.text || 'New message') + (more > 0 ? ` · +${more} more` : ''),
+        });
+        if (bannerTimer.current !== null) window.clearTimeout(bannerTimer.current);
+        bannerTimer.current = window.setTimeout(() => setIncoming(null), 6000);
+      }
 
       if (fresh.length && document.visibilityState !== 'visible' && settings.notifications) {
         beep();
@@ -1150,6 +1202,22 @@ export function Messenger({
         <IncomingCall call={call} onAccept={acceptIncoming} onDecline={declineIncoming} />
       ) : call ? (
         <CallScreen me={me} call={call} onEnded={callEnded} onToast={flash} />
+      ) : null}
+
+      {incoming ? (
+        <button
+          type="button"
+          className="message-banner"
+          onClick={() => {
+            // Opening it is also dismissing it: the message is now on screen, and a banner left
+            // sitting over the conversation it is describing would be absurd.
+            setIncoming(null);
+            void openChat(incoming.chatId);
+          }}
+        >
+          <span className="who">{incoming.title}</span>
+          <span className="what">{incoming.body}</span>
+        </button>
       ) : null}
 
       {toast ? <div className="toast">{toast}</div> : null}
