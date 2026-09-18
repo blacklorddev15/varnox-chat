@@ -1,5 +1,7 @@
 'use client';
 
+import { AdminWipe } from './admin-wipe';
+
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { post } from '@/lib/client';
@@ -288,6 +290,8 @@ export function AdminPanel({
           </div>
         ))}
       </section>
+
+      <AdminWipe />
     </div>
   );
 }
