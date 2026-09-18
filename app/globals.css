@@ -1263,7 +1263,8 @@ html[data-theme='dark'] .sel-bar {
 .emoji-panel {
   border-top: 1px solid var(--line);
   background: var(--panel-2);
-  height: 292px;
+  height: 70vh;
+  height: 70dvh;
   display: flex;
   flex-direction: column;
   flex: none;

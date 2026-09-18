@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReplyDraft } from './messenger';
 import { EmojiPanel } from './emoji';
+import { requestMediaPermissions } from '../lib/media-permissions';
 import {
   IconAttach,
   IconCamera,
@@ -182,6 +183,27 @@ export function Composer({
   function pickWith(open: () => void) {
     closeSheet();
     open();
+  }
+
+  /* ------------------------------------------------ camera, microphone, photos */
+
+  /**
+   * The ask that goes with opening the panel.
+   *
+   * Deliberately fired on the way in only, and not awaited by the caller: the panel opens at
+   * once and the dialog appears over it, rather than the tap doing nothing visible until the
+   * person has answered. `requestMediaPermissions` explains what each outcome means.
+   */
+  function askForDeviceAccess() {
+    void requestMediaPermissions().then((outcome) => {
+      // 'native' is the shell showing Android's dialog, which answers for itself; 'granted'
+      // and 'unsupported' need no comment from us either.
+      if (outcome === 'denied') {
+        setError('Camera and microphone were refused, so pictures and voice notes will not work');
+      } else if (outcome === 'unavailable') {
+        setError('This device has no camera or microphone to use');
+      }
+    });
   }
 
   /**
@@ -566,6 +588,7 @@ export function Composer({
               className={`icon-btn${emoji ? ' on' : ''}`}
               title="Emoji"
               onClick={() => {
+                if (!emoji) askForDeviceAccess();
                 setEmoji((v) => !v);
                 closeSheet();
               }}
