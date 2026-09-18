@@ -1263,10 +1263,51 @@ html[data-theme='dark'] .sel-bar {
 .emoji-panel {
   border-top: 1px solid var(--line);
   background: var(--panel-2);
-  height: 260px;
+  height: 292px;
   display: flex;
   flex-direction: column;
   flex: none;
+}
+
+/* The panel's own title bar, matching every other screen: back chevron hard left, heading in
+   the italic serif the app sets its titles in, in gold. */
+.emoji-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 2px;
+  flex: none;
+}
+.emoji-back {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--brand-strong);
+}
+.emoji-back:hover {
+  background: var(--hover);
+}
+.emoji-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--brand-strong);
+}
+
+/* Stickers are the same glyphs drawn large, so the grid is coarser and they read as pictures
+   rather than as text. */
+.emoji-grid.stickers {
+  grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+}
+.emoji-grid.stickers button {
+  font-size: 38px;
+  padding: 6px 0;
 }
 .emoji-tabs {
   display: flex;

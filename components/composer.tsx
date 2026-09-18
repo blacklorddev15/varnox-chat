@@ -292,6 +292,7 @@ export function Composer({
             setText((t) => t + e);
             areaRef.current?.focus();
           }}
+          onClose={() => setEmoji(false)}
         />
       ) : null}
 
