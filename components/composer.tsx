@@ -35,6 +35,7 @@ export function Composer({
   onSend,
   onTyping,
   blocked,
+  recentMedia,
 }: {
   sending: boolean;
   reply: ReplyDraft;
