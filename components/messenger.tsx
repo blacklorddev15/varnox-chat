@@ -167,6 +167,15 @@ export function Messenger({
   const typingSentAt = useRef(0);
 
   const selected = useMemo(() => chats.find((c) => c.id === selectedId) ?? null, [chats, selectedId]);
+  /**
+   * The callee for the chat header's call buttons.
+   *
+   * Captured as a plain id rather than closing over `selected`, because these handlers are
+   * arrow functions that run later and TypeScript will not carry a `selected?.peer` guard into
+   * them. Null for a group or a chat with nobody else in it, which is what hides the buttons
+   * instead of showing a control that cannot work.
+   */
+  const callPeerId = selected?.peer?.id ?? null;
 
   /* ---------------------------------------------------------------- theme */
 
@@ -1050,6 +1059,8 @@ export function Messenger({
           }}
           onToggleTheme={toggleTheme}
           onOpenInfo={() => setPanel('chat-info')}
+          onVoiceCall={callPeerId ? () => startCall(callPeerId, 'audio') : undefined}
+          onVideoCall={callPeerId ? () => startCall(callPeerId, 'video') : undefined}
           onStartChat={startChatWith}
           onSend={send}
           onReact={react}

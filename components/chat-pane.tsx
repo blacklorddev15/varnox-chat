@@ -23,12 +23,14 @@ import {
   IconInfo,
   IconLogo,
   IconMoon,
+  IconPhone,
   IconReply,
   IconSearch,
   IconSmilePlus,
   IconStar,
   IconSun,
   IconTrash,
+  IconVideoCall,
 } from './icons';
 
 type Tick = 'sent' | 'delivered' | 'read';
@@ -208,6 +210,8 @@ export function ChatPane({
   onBack,
   onToggleTheme,
   onOpenInfo,
+  onVoiceCall,
+  onVideoCall,
   onStartChat,
   onSend,
   onReact,
@@ -241,6 +245,12 @@ export function ChatPane({
   onBack: () => void;
   onToggleTheme: () => void;
   onOpenInfo: () => void;
+  /**
+   * Both are optional and omitted when there is nobody to call, so the buttons simply are not
+   * there rather than being present and inert.
+   */
+  onVoiceCall?: () => void;
+  onVideoCall?: () => void;
   /** Opens (or reuses) the direct chat with a user, the same path the new-chat panel takes. */
   onStartChat: (userId: string) => void;
   onSend: (payload: Outgoing) => void;
@@ -362,6 +372,16 @@ export function ChatPane({
           <h2>{chat.title}</h2>
           <span style={typingNames.length ? { color: '#6ee0bc' } : undefined}>{subtitle}</span>
         </button>
+        {onVoiceCall ? (
+          <button type="button" className="header-btn" title="Voice call" onClick={onVoiceCall}>
+            <IconPhone size={20} />
+          </button>
+        ) : null}
+        {onVideoCall ? (
+          <button type="button" className="header-btn" title="Video call" onClick={onVideoCall}>
+            <IconVideoCall size={20} />
+          </button>
+        ) : null}
         <button
           type="button"
           className="header-btn"
