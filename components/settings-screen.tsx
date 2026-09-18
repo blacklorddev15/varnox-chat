@@ -68,15 +68,27 @@ function NotificationHealth() {
   // No shell to ask, so nothing to say — a browser tab manages its own notifications.
   if (!state) return null;
 
+  /**
+   * Ordered by what blocks the most.
+   *
+   * The two Android switches are checked before the service, because they silence everything and
+   * are reported identically by an app that cannot see them: a phone with notifications off for
+   * Varnox looks exactly like one where the fetch is failing, and only one of those is a code
+   * problem. The permission comes first only because nothing at all can be drawn without it.
+   */
   const line = !state.permitted
     ? 'Android refused notification permission, so nothing can be shown. Switch this off and on again to be asked.'
-    : !state.running
-      ? 'The background connection is not running. Switch this off and on again to restart it.'
-      : state.problem
-        ? `Running, but not delivering: ${state.problem}.`
-        : state.chats >= 0
-          ? `Working — last checked ${relativeTime(state.lastPollAt)}, ${state.chats} conversation${state.chats === 1 ? '' : 's'} seen.`
-          : 'Running. Waiting for the first check.';
+    : !state.enabled
+      ? 'Android has notifications switched off for Varnox. Turn them on in Android’s app settings — nothing can appear until then.'
+      : state.channelMuted
+        ? 'The Direct messages channel is muted in Android’s notification settings, so messages are being delivered into nothing.'
+        : !state.running
+          ? 'The background connection is not running. Switch this off and on again to restart it.'
+          : state.problem
+            ? `Running, but not delivering: ${state.problem}.`
+            : state.chats >= 0
+              ? `Working — last checked ${relativeTime(state.lastPollAt)}, ${state.chats} conversation${state.chats === 1 ? '' : 's'} seen.`
+              : 'Running. Waiting for the first check.';
 
   return (
     <p className="hint" style={{ padding: '0 22px' }}>
@@ -570,11 +582,15 @@ export function SettingsScreen({
                 type="button"
                 className="settings-row"
                 onClick={() => {
-                  const asked = sendTestNotification();
+                  const { supported, problem } = sendTestNotification();
+                  // The reason comes from the shell, which can see the switches below the
+                  // permission. A test that silently does nothing is the thing this replaces.
                   onToast(
-                    asked
-                      ? 'Sent — it should appear in a moment. It clears itself.'
-                      : 'This app cannot post a test notification'
+                    !supported
+                      ? 'This app cannot post a test notification'
+                      : problem
+                        ? problem
+                        : 'Sent — a notification should appear now. It clears itself.'
                   );
                 }}
               >

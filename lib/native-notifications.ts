@@ -17,13 +17,17 @@ type NativeBridge = {
   notificationsEnabled?: () => boolean;
   setNotifications?: (enabled: boolean) => void;
   notificationDiagnostics?: () => string;
-  testNotification?: () => void;
+  testNotification?: () => string | null;
 };
 
 /** What the shell reports about the background connection, as far as it is willing to say. */
 export type NotificationDiagnostics = {
   wanted: boolean;
   permitted: boolean;
+  /** Android's own switch for this app, which is a separate thing from the permission. */
+  enabled: boolean;
+  /** The message channel specifically switched off, which silences messages and nothing else. */
+  channelMuted: boolean;
   running: boolean;
   chats: number;
   lastPollAt: number;
@@ -63,22 +67,23 @@ export function nativeNotificationsEnabled(): boolean {
 /**
  * Ask the shell to post a notification now.
  *
- * Returns whether the shell can do it at all, not whether the notification appeared — that is
- * the point of asking. Android may need to raise its permission dialog first, in which case the
- * notification arrives after the answer and long after this has returned; there is nothing to
- * wait for, and nothing this call could report beyond "the app was asked".
+ * Returns null when the shell took it, and a sentence explaining why not when it did not.
  *
- * False in a browser, where notification permission is the browser's business and the settings
- * screen already has a switch for it.
+ * The distinction that matters is between "we tried and Android refused" and "we tried and
+ * nothing happened", because the second is not a report — it is the same report for every
+ * possible cause. Anything the shell can rule out before posting, it says, so that a test which
+ * shows nothing has told the person something they can act on.
+ *
+ * `supported: false` means there is no shell to ask, which is what a browser is: notification
+ * permission there is the browser's business and the switch above already handles it.
  */
-export function sendTestNotification(): boolean {
+export function sendTestNotification(): { supported: boolean; problem: string | null } {
   const native = bridge();
-  if (typeof native?.testNotification !== 'function') return false;
+  if (typeof native?.testNotification !== 'function') return { supported: false, problem: null };
   try {
-    native.testNotification();
-    return true;
+    return { supported: true, problem: native.testNotification() ?? null };
   } catch {
-    return false;
+    return { supported: true, problem: 'the shell refused the request' };
   }
 }
 
@@ -100,6 +105,10 @@ export function nativeNotificationDiagnostics(): NotificationDiagnostics | null 
     return {
       wanted: parsed.wanted === true,
       permitted: parsed.permitted === true,
+      // Default true rather than false: an older shell that does not report these has not
+      // reported a problem either, and inventing one would show a warning that is not true.
+      enabled: parsed.enabled !== false,
+      channelMuted: parsed.channelMuted === true,
       running: parsed.running === true,
       chats: typeof parsed.chats === 'number' ? parsed.chats : -1,
       lastPollAt: typeof parsed.lastPollAt === 'number' ? parsed.lastPollAt : 0,
