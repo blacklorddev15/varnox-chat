@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, post } from '@/lib/client';
 import type { Call, CallSignal, PublicUser } from '@/lib/types';
 import { presence, relativeTime } from '@/lib/format';
+import { setNativeCallActive } from '@/lib/native-call';
 import { Avatar } from './avatar';
 import { Sheet, useUserSearch } from './panels';
 import {
@@ -470,6 +471,12 @@ export function CallScreen({
     }
     cleanupRef.current = stopEverything;
 
+    /* The app is about to go off screen and this call would be cut off with it. Told now rather
+       than when the call is answered, so an outgoing call is protected while it is still
+       ringing — the app is just as likely to be left during those seconds. Nothing happens in a
+       browser, where there is no shell to tell. */
+    setNativeCallActive(true);
+
     async function send(kind: CallSignal['kind'], payload: unknown) {
       try {
         await post(`/api/calls/${call.id}/signal`, { kind, payload: JSON.stringify(payload) });
@@ -636,6 +643,11 @@ export function CallScreen({
       cancelled = true;
       stopEverything();
       cleanupRef.current = null;
+      /* Said here rather than in hangUp, because this is the one place every ending passes
+         through — the hang-up button, the other side leaving, and a connection that fails. A
+         shell still holding a call open after the call screen has gone would leave a microphone
+         indicator on screen for a conversation that is over. */
+      setNativeCallActive(false);
     };
     // Keyed on the call's identity and this end's role, not on the call object, which the poll
     // replaces every second — a negotiation is not restarted by a status field changing.
