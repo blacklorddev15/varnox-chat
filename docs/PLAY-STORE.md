@@ -62,17 +62,34 @@ Screenshots will need to come from a real device. Your welcome card, a chat, and
 
 ## 5. The two things that will actually block you
 
-### The domain must work first — this is hard, not a preference
+### The domain is settled — use `varnox-chat.vercel.app`
 
 A Trusted Web Activity is **bound to a domain** and proves ownership by serving a file at that domain:
 
 ```
-https://varnoxapp.blacklord.tech/.well-known/assetlinks.json
+https://varnox-chat.vercel.app/.well-known/assetlinks.json
 ```
 
 Chrome fetches it and compares it against the app's signing fingerprint. If it is missing or wrong, the app either refuses to open or shows a **URL bar across the top** — a web page in a frame rather than an app.
 
-`varnoxapp.blacklord.tech` returns **404 on every path today**, so it cannot host that file. The TXT record at ResellerClub is still the blocker: `…9c00` needs to become `…3a4a`. Nothing about the APK can be finished until this is done.
+**This does not need the custom domain.** `varnox-chat.vercel.app` is a real HTTPS domain served by
+this project, so it can host that file, and the app declares *that* as its host. The `blacklord.tech`
+subdomain was never a requirement for the APK, and stays optional: fix it whenever, and the web app
+gains a shorter address without the APK changing.
+
+The route exists now — `app/.well-known/assetlinks.json/route.ts` — reading `ANDROID_PACKAGE_NAME`
+and `ANDROID_SHA256`. It answers **404 until both are set**, deliberately, so an unconfigured
+deployment looks unconfigured rather than looking like a mismatch.
+
+⚠️ **`ANDROID_SHA256` normally needs TWO fingerprints.** With Play App Signing on — the default —
+Google re-signs the bundle with its own key, so the certificate on the installed app is *not* the one
+that signed the file you uploaded. Declare only the upload key and you get an app that works
+sideloaded and shows a URL bar when installed from Play. It is the most common way this file is
+wrong, and the failure is silent.
+
+Note the sending domain does **not** follow the app's address: `MAIL_FROM` stays on
+`varnoxapp.blacklord.tech`, because Resend verifies a domain whose DNS you control and a
+`vercel.app` subdomain cannot be verified. App address and mail address are allowed to differ.
 
 ### Policy 4.3 — Google tightened this in 2025–2026
 
@@ -90,10 +107,11 @@ Play has been **hardening its rules against apps that are essentially a website 
 
 ## 7. Order of operations
 
-1. **Fix the TXT record** → `varnoxapp.blacklord.tech` serves the app
+1. **Set `ANDROID_PACKAGE_NAME` and `ANDROID_SHA256`** once a keystore exists — both the upload key
+   and Play's — and check `/.well-known/assetlinks.json` serves them
 2. **Add the privacy policy page** and a public deletion-request page
 3. **Build the AAB** (PWABuilder is the fastest; CI if you want it repeatable)
-4. **Publish `assetlinks.json`** with the fingerprint from the keystore that signed it
+4. **Verify it opens without a URL bar** — the real test that step 1 worked
 5. **Verify it opens without a URL bar** — this is the real test that step 4 worked
 6. **Developer account** — a one-time registration fee, then identity verification, which for a new personal account also involves testing requirements before you can reach production. Check the current terms in the Play Console.
 7. **Store listing** — assets from section 4, then the forms from section 6
