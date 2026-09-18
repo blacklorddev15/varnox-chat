@@ -1,13 +1,15 @@
 import type { Metadata } from 'next';
-import { Messenger } from '@/components/messenger';
-import { pageGate } from '@/lib/page-gate';
 
-export const dynamic = 'force-dynamic';
+import { GatedMessenger } from '@/components/gated';
 
 /**
- * `metadata` is set per page rather than inherited, so the tab names the screen instead of saying
- * "Varnox" and nothing else, and so a URL that only means anything when signed in stays out of
- * search results — the same reasoning as /bots.
+ * A page under /chat, so it renders the shell: the sidebar, and this column. Messenger reads the
+ * path and puts the matching pane here, which is what makes the URL real rather than decorative —
+ * a hard load of this address paints the screen, and the back gesture has somewhere to go.
+ *
+ * The gate moved to lib/use-gate.tsx, and the reason is in app/chat/page.tsx. What stayed is
+ * `metadata`: a page marked 'use client' cannot export it, so this one stays a server component
+ * and renders a client component inside.
  */
 export const metadata: Metadata = {
   title: 'Settings',
@@ -15,13 +17,6 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-/**
- * A page under /chat, so it renders the shell: the sidebar, and this column. Messenger reads the
- * path and puts the matching pane here, which is what makes the URL real rather than decorative —
- * a hard load of this address paints the screen, and the back gesture has somewhere to go.
- */
-export default async function Page() {
-  const gate = await pageGate();
-  if (!gate.ok) return gate.screen;
-  return <Messenger me={gate.me} isAdmin={gate.isAdmin} />;
+export default function Page() {
+  return <GatedMessenger />;
 }

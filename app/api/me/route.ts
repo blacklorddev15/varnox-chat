@@ -1,5 +1,6 @@
-import { currentUser, publicUser, requireUser } from '@/lib/auth';
+import { currentUser, isAdmin, publicUser, requireUser } from '@/lib/auth';
 import { bad, clean, handle, ok, readJsonBody } from '@/lib/api';
+import { googleConfigured } from '@/lib/google';
 import {
   emailTaken,
   getSuspension,
@@ -16,12 +17,31 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   return handle(async () => {
+    /**
+     * `google` is answered here because this is the one endpoint a signed-out page can call.
+     *
+     * Whether Google sign-in is offered depends on the server's environment, which the browser
+     * cannot see. The sign-in screen used to learn it from a server component that read it
+     * directly; now that the screens render on the client, this is where that answer has to come
+     * from. It is a boolean — it reveals nothing about the client id or the secret, and says only
+     * whether there is one.
+     */
+    const google = googleConfigured();
+
     const me = await currentUser();
-    if (!me) return ok({ user: null, suspension: null });
+    if (!me) return ok({ user: null, suspension: null, google });
+
     // Returned beside the user rather than inside it. PublicUser is the shape that describes
     // *other* people as well, and whether an account is suspended is nobody else's business —
     // putting it in that projection would leak it through search, member lists and chat rows.
-    return ok({ user: publicUser(me), suspension: await getSuspension(me.id) });
+    // `isAdmin` sits beside it for the same reason: it is a fact about the viewer, derived from
+    // the environment, and has no place in a shape handed out to describe other people.
+    return ok({
+      user: publicUser(me),
+      suspension: await getSuspension(me.id),
+      isAdmin: isAdmin(me),
+      google,
+    });
   });
 }
 

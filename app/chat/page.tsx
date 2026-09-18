@@ -1,20 +1,17 @@
-import { Messenger } from '@/components/messenger';
-import { pageGate } from '@/lib/page-gate';
-
-export const dynamic = 'force-dynamic';
+import { GatedMessenger } from '@/components/gated';
 
 /**
- * The gate moved to lib/page-gate when the five panes became routes and needed it too. The
- * reasoning that used to be inlined here went with it — reconcile before reading, because a
- * cold instance whose first request is a page would otherwise read a column that does not
- * exist yet; check suspension here as well as in requireUser(), because a page renders from
- * the session alone and a suspended account would otherwise be handed the whole app; and no
- * branch for deletion, because currentUser() already returns null for a deleted account.
+ * The app shell.
  *
- * One copy of the lockout check for all six pages, which is the point of the extraction.
+ * This used to gate here, deciding from the session before any data was read. The decision moved
+ * to lib/use-gate.tsx when the app gained an offline mode: a page that reads the session with
+ * `cookies()` cannot be rendered ahead of time, and being rendered ahead of time is what lets
+ * the app open with no network at all.
+ *
+ * Nothing is lost by it. The API routes are still gated by requireUser(), which is where the
+ * enforcement always actually was — the gate here was a convenience that kept a signed-out
+ * visitor from seeing a shell they could not use, and the client gate still does that.
  */
-export default async function ChatPage() {
-  const gate = await pageGate();
-  if (!gate.ok) return gate.screen;
-  return <Messenger me={gate.me} isAdmin={gate.isAdmin} />;
+export default function ChatPage() {
+  return <GatedMessenger />;
 }
