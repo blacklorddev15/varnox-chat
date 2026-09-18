@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { api, post, uploadMedia } from '@/lib/client';
+import { nativeNotificationsEnabled } from '@/lib/native-notifications';
 import type {
   Call,
   ChatRow,
@@ -266,7 +267,10 @@ export function Messenger({
 
       if (fresh.length && document.visibilityState !== 'visible' && settings.notifications) {
         beep();
-        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        // Inside the app the shell raises these from its own foreground service, so posting them
+        // here as well would announce every message twice. The notification call below is for a
+        // browser tab, where there is no shell to do it.
+        if (!nativeNotificationsEnabled() && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
           for (const chat of fresh.slice(0, 3)) {
             try {
               const n = new Notification(chat.title, {
