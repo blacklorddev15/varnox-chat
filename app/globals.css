@@ -3175,12 +3175,12 @@ html[data-theme='dark'] .call-dir {
    treated as scroll and can jitter while a phone scrolls a message list.
    ========================================================================== */
 :root {
-  --fire-scrim-app: linear-gradient(rgba(9, 7, 4, 0.84), rgba(9, 7, 4, 0.84));
+  --fire-scrim-app: linear-gradient(rgba(9, 7, 4, 0.45), rgba(9, 7, 4, 0.45));
   --fire-scrim-chat: linear-gradient(
     180deg,
-    rgba(9, 7, 4, 0.9) 0%,
-    rgba(9, 7, 4, 0.78) 38%,
-    rgba(9, 7, 4, 0.92) 100%
+    rgba(9, 7, 4, 0.62) 0%,
+    rgba(9, 7, 4, 0.45) 38%,
+    rgba(9, 7, 4, 0.68) 100%
   );
 }
 
@@ -3196,6 +3196,17 @@ html[data-theme='dark'] .chat-pane {
   background-size: cover, cover;
   background-position: center, center;
   background-repeat: no-repeat, no-repeat;
+}
+
+/* With the backdrop now legible, the shell and the chat list have to stop painting over
+   it. Both keep most of their own colour, because message text and the chat list sit
+   directly on these columns and contrast is what pays for the effect. */
+html[data-theme='dark'] .app {
+  background: transparent;
+}
+
+html[data-theme='dark'] .sidebar {
+  background: color-mix(in srgb, var(--panel) 68%, transparent);
 }
 
 /* The doodle was drawn for a flat ground and only adds noise over a photograph, so it
