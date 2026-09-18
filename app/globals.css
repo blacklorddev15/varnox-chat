@@ -1264,10 +1264,22 @@ html[data-theme='dark'] .sel-bar {
   border-top: 1px solid var(--line);
   background: var(--panel-2);
   height: 70vh;
-  height: 70dvh;
   display: flex;
   flex-direction: column;
   flex: none;
+}
+
+/*
+ * dvh rather than vh: on mobile, vh is measured against the largest possible viewport, so a
+ * sheet sized in vh reaches under the address bar whenever the bar is showing. This lives in
+ * its own @supports block rather than as a second `height` inside the rule above because a
+ * minifier may — and did — discard a declaration the very next line overrides, which left
+ * browsers without dvh with no height at all.
+ */
+@supports (height: 1dvh) {
+  .emoji-panel {
+    height: 70dvh;
+  }
 }
 
 /* The picker's bar: back, search, the emoji / GIF / sticker segments, and the key that deletes
