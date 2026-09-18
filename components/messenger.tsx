@@ -161,6 +161,15 @@ export function Messenger({
 
   const lastAtRef = useRef(0);
   const selectedRef = useRef<string | null>(null);
+  /**
+   * In-flight guard for sending, kept in a ref rather than read from state.
+   *
+   * The gallery picker sends several images one after another. A closure captures `sending` from
+   * the render it was created in, so the second call in that sequence read a stale value and the
+   * guard could let two uploads race — or, worse, silently drop every image after the first. A
+   * ref is always current.
+   */
+  const sendingRef = useRef(false);
   const messagesBox = useRef<HTMLDivElement | null>(null);
   const seenLastIds = useRef<Map<string, string>>(new Map());
   const firstListLoad = useRef(true);
@@ -610,7 +619,8 @@ export function Messenger({
       once?: boolean;
     }) => {
       const chatId = selectedRef.current;
-      if (!chatId || sending) return;
+      if (!chatId || sendingRef.current) return;
+      sendingRef.current = true;
       setSending(true);
       try {
         let body: Record<string, unknown> = { type: 'text', text: payload.text, replyTo: reply };
@@ -679,6 +689,7 @@ export function Messenger({
       } catch (err) {
         flash(err instanceof Error ? err.message : 'Message was not sent');
       } finally {
+        sendingRef.current = false;
         setSending(false);
       }
     },

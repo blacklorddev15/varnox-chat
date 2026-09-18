@@ -39,9 +39,11 @@ export function Composer({
   sending: boolean;
   reply: ReplyDraft;
   onClearReply: () => void;
-  onSend: (payload: Outgoing) => void;
+  onSend: (payload: Outgoing) => void | Promise<void>;
   onTyping: () => void;
   blocked: boolean;
+  /** Pictures already sent in this chat, newest first. */
+  recentMedia?: string[];
 }) {
   const [text, setText] = useState('');
   const [emoji, setEmoji] = useState(false);
@@ -49,6 +51,12 @@ export function Composer({
   const [image, setImage] = useState<File | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  /** Images chosen from the gallery, held open in the picker until they are sent or dropped. */
+  const [gallery, setGallery] = useState<File[]>([]);
+  const [gallerySel, setGallerySel] = useState<boolean[]>([]);
+  const [galleryUrls, setGalleryUrls] = useState<string[]>([]);
+  const [galleryCaption, setGalleryCaption] = useState('');
+  const [galleryOpen, setGalleryOpen] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordSec, setRecordSec] = useState(0);
   const [viewOnce, setViewOnce] = useState(false);
@@ -86,6 +94,61 @@ export function Composer({
   useEffect(() => {
     if (reply) areaRef.current?.focus();
   }, [reply]);
+
+  useEffect(() => {
+    const urls = gallery.map((f) => URL.createObjectURL(f));
+    setGalleryUrls(urls);
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, [gallery]);
+
+  function closeGallery() {
+    setGalleryOpen(false);
+    setGallery([]);
+    setGallerySel([]);
+    setGalleryCaption('');
+  }
+
+  /**
+   * Sends each selected image as its own message, in order, with the caption on the first.
+   *
+   * Sequential, and awaited, on purpose. send() in messenger refuses a second call while one is
+   * already in flight, so firing these together would silently post only the first image and
+   * drop the rest with no error anywhere.
+   */
+  async function sendGallery() {
+    const chosen = gallery.filter((_, i) => gallerySel[i]);
+    if (!chosen.length || sending) return;
+    const caption = galleryCaption.trim();
+    const once = viewOnce;
+    closeGallery();
+    setViewOnce(false);
+    for (let i = 0; i < chosen.length; i += 1) {
+      await onSend({ text: i === 0 ? caption : '', image: chosen[i], once });
+    }
+  }
+
+  /**
+   * Reuses a picture already sent in this chat.
+   *
+   * The app only holds its URL, and the upload path wants a File, so it is fetched back and
+   * wrapped. It then goes through exactly the same picker as a freshly chosen image.
+   */
+  async function useRecent(url: string) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(String(res.status));
+      const blob = await res.blob();
+      const file = new File([blob], 'recent', { type: blob.type || 'image/jpeg' });
+      closeSheet();
+      setImage(null);
+      setFile(null);
+      setGallery([file]);
+      setGallerySel([true]);
+      setGalleryOpen(true);
+    } catch {
+      setError('That picture could not be loaded.');
+    }
+  }
 
   function submit() {
     const body = text.trim();
@@ -305,6 +368,25 @@ export function Composer({
 
       {attachOpen ? (
         <div className="attach-sheet">
+          {recentMedia && recentMedia.length ? (
+            <>
+              <p className="emoji-section">Recent in this chat</p>
+              <div className="recent-strip">
+                {recentMedia.map((u) => (
+                  <button
+                    key={u}
+                    type="button"
+                    className="recent-cell"
+                    onClick={() => useRecent(u)}
+                    aria-label="Reuse this picture"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={u} alt="" />
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
           {contactOpen ? (
             <form
               className="attach-contact"
@@ -396,15 +478,24 @@ export function Composer({
       ) : null}
 
       <div className="composer">
+        {/* The gallery takes several at once and hands them to the picker overlay, where the
+            caption, the view-once flag and the send button live. The camera input below stays
+            single-shot and uses the inline preview, because a camera capture is one picture. */}
         <input
           ref={imageRef}
           type="file"
           accept="image/png,image/jpeg,image/webp,image/gif"
+          multiple
           hidden
           onChange={(e) => {
-            setImage(e.target.files?.[0] ?? null);
-            setFile(null);
+            const files = Array.from(e.target.files ?? []);
             e.target.value = '';
+            if (!files.length) return;
+            setImage(null);
+            setFile(null);
+            setGallery(files);
+            setGallerySel(files.map(() => true));
+            setGalleryOpen(true);
           }}
         />
         {/* Separate from the gallery input: capture makes a phone open the camera directly. */}
@@ -539,6 +630,76 @@ export function Composer({
           </button>
         )}
       </div>
+
+      {/* What was picked, a caption and the send button, over everything. The grid here is the
+          images this app was handed in the OS picker — a website cannot read the phone's photo
+          library, so there is no "Recents" set to show behind it. */}
+      {galleryOpen ? (
+        <div className="picker">
+          <div className="picker-top">
+            <button
+              type="button"
+              className="emoji-ic"
+              onClick={closeGallery}
+              title="Cancel"
+              aria-label="Cancel"
+            >
+              <IconClose size={18} />
+            </button>
+            <h3 className="picker-title">
+              {gallerySel.filter(Boolean).length} selected
+            </h3>
+          </div>
+
+          <div className="picker-grid">
+            {galleryUrls.map((url, i) => (
+              <button
+                key={url}
+                type="button"
+                className={`picker-cell${gallerySel[i] ? ' on' : ''}`}
+                onClick={() =>
+                  setGallerySel((sel) => sel.map((v, j) => (j === i ? !v : v)))
+                }
+                aria-label={`Image ${i + 1}`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={url} alt="" />
+                {gallerySel[i] ? (
+                  <span className="picker-badge">
+                    {gallerySel.slice(0, i + 1).filter(Boolean).length}
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+
+          <div className="picker-bar">
+            <button
+              type="button"
+              className={`icon-btn${viewOnce ? ' on' : ''}`}
+              title="View once"
+              onClick={() => setViewOnce((v) => !v)}
+            >
+              {onceBadge}
+            </button>
+            <input
+              className="picker-caption"
+              value={galleryCaption}
+              onChange={(e) => setGalleryCaption(e.target.value)}
+              placeholder="Add a caption…"
+            />
+            <button
+              type="button"
+              className="send-btn"
+              onClick={sendGallery}
+              disabled={sending || !gallerySel.some(Boolean)}
+              title="Send"
+            >
+              <IconSend size={20} />
+            </button>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

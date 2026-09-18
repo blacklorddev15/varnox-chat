@@ -1412,6 +1412,110 @@ html[data-theme='dark'] .sel-bar {
   color: var(--muted);
 }
 
+/* The gallery picker: what was chosen, a caption and send, over everything else.
+   The grid shows the images this app was handed in the OS picker. A website cannot enumerate
+   the phone's photo library, so there is no "Recents" set behind it to show — that part of the
+   reference is not reachable from a browser. */
+.picker {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--app-bg);
+  display: flex;
+  flex-direction: column;
+}
+.picker-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 8px;
+}
+.picker-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--brand-strong);
+}
+.picker-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 0 2px;
+  align-content: start;
+}
+.picker-cell {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  display: block;
+}
+.picker-cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0.5;
+  transition: opacity 0.12s ease;
+}
+.picker-cell.on img {
+  opacity: 1;
+}
+.picker-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #10100f;
+  background: var(--brand);
+}
+.picker-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+}
+.picker-caption {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Pictures already sent in this chat, offered as a strip inside the attachment sheet. */
+.recent-strip {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 0 2px 8px;
+}
+.recent-cell {
+  flex: none;
+  width: 58px;
+  height: 58px;
+  border-radius: 8px;
+  overflow: hidden;
+  display: block;
+}
+.recent-cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 /* Stickers are the same glyphs drawn large, so the grid is coarser and they read as pictures
    rather than as text. */
 .emoji-grid.stickers {

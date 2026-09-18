@@ -277,6 +277,23 @@ export function ChatPane({
   const [infoFor, setInfoFor] = useState<Message | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  /**
+   * Pictures already sent in this conversation, newest first.
+   *
+   * The nearest a browser can get to a "Recents" strip: a website cannot read the phone's photo
+   * library, so the only media it can honestly offer up front is media it already holds. View-once
+   * pictures are left out, and so are anything with a missing URL.
+   */
+  const recentMedia = useMemo(
+    () =>
+      messages
+        .filter((m) => m.type === 'image' && m.mediaUrl && !m.once)
+        .map((m) => m.mediaUrl as string)
+        .slice(-12)
+        .reverse(),
+    [messages]
+  );
   const [searchQ, setSearchQ] = useState('');
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -936,6 +953,7 @@ export function ChatPane({
           onSend={onSend}
           onTyping={onTyping}
           blocked={blocked}
+          recentMedia={recentMedia}
         />
       )}
 
