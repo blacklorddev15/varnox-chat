@@ -64,3 +64,24 @@ export function setNativeNotifications(enabled: boolean): void {
     // Nothing to recover from: the switch will simply stay where the shell says it is.
   }
 }
+
+/**
+ * Turn background notifications on and wait for Android's answer.
+ *
+ * The permission dialog is answered by the person, not by the app, and it can take as long as
+ * they take to read it — so there is no promise to await and nothing to report synchronously.
+ * The only honest source of truth is the shell's own answer, asked for until it changes or
+ * patience runs out. Fifteen seconds is long enough to read a dialog and short enough that a
+ * refusal reports itself rather than appearing to hang.
+ *
+ * Both places that ask — the sign-up wizard and Settings — go through this, so the two agree on
+ * what "on" means and neither can drift into reporting an outcome Android has not given yet.
+ */
+export async function enableNativeNotifications(): Promise<boolean> {
+  setNativeNotifications(true);
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    if (nativeNotificationsEnabled()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return nativeNotificationsEnabled();
+}

@@ -12,8 +12,8 @@ import type {
 import { post } from '@/lib/client';
 import { formatPhone } from '@/lib/phone';
 import {
+  enableNativeNotifications,
   nativeNotificationsAvailable,
-  nativeNotificationsEnabled,
   setNativeNotifications,
 } from '@/lib/native-notifications';
 import { Avatar } from './avatar';
@@ -38,22 +38,6 @@ const STATUS_WHO: { id: StatusPrivacyWho; label: string }[] = [
   { id: 'everyone', label: 'Everyone' },
   { id: 'chats', label: 'My chats' },
 ];
-
-/**
- * Waits for the app to report that background notifications are really running.
- *
- * Android's permission dialog is answered by the person, not by the app, so there is no callback
- * to await — the only honest source of truth is the shell's own answer, asked for until it
- * changes or patience runs out. Fifteen seconds is long enough to read a dialog and short enough
- * that a refusal reports itself rather than appearing to hang.
- */
-async function waitForNativeNotifications(): Promise<boolean> {
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    if (nativeNotificationsEnabled()) return true;
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  return nativeNotificationsEnabled();
-}
 
 export function SettingsScreen({
   me,
@@ -116,10 +100,7 @@ export function SettingsScreen({
         await onSave({ notifications: false });
         return;
       }
-      // The answer to Android's dialog arrives after setNotifications returns, and it can take
-      // as long as the person takes to read it. So the shell is asked what actually happened,
-      // repeatedly, rather than being told an outcome that is not known yet.
-      const granted = await waitForNativeNotifications();
+      const granted = await enableNativeNotifications();
       await onSave({ notifications: granted });
       onToast(granted ? 'Notifications on' : 'Android refused notification permission');
       return;

@@ -3,6 +3,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, patch, post, uploadImage } from '@/lib/client';
+import {
+  enableNativeNotifications,
+  nativeNotificationsAvailable,
+} from '@/lib/native-notifications';
 import { Avatar } from './avatar';
 import { IconLogo } from './icons';
 
@@ -563,14 +567,30 @@ export function AuthScreen({
   }
 
   /**
-   * Ask the browser whether it will show notifications. Nothing is subscribed here and no
-   * service worker is involved: the answer is reported and that is all. The API is missing
-   * in some browsers and in anything not served over https, so it is checked before it is
-   * called rather than being allowed to throw.
+   * Ask for permission to show notifications, so the question is answered during sign-up rather
+   * than being left for the person to find in Settings later.
+   *
+   * Which "permission" means depends on where this is running. In a browser it is the site's,
+   * asked through the Notification API. In the Android app there is no such API — Chromium does
+   * not implement it in WebView — and the grant belongs to the app, so the request goes to the
+   * shell, which raises Android's own dialog and starts the background service if it is allowed.
    */
   async function requestNotifications() {
     if (notifyBusy) return;
     setError('');
+
+    if (nativeNotificationsAvailable()) {
+      setNotifyBusy(true);
+      try {
+        setNotifyOutcome((await enableNativeNotifications()) ? 'granted' : 'denied');
+      } finally {
+        setNotifyBusy(false);
+      }
+      return;
+    }
+
+    // The API is missing in some browsers and in anything not served over https, so it is
+    // checked before it is called rather than being allowed to throw.
     if (typeof window === 'undefined' || !('Notification' in window) || !window.Notification) {
       setNotifyOutcome('unavailable');
       return;
@@ -1281,8 +1301,10 @@ export function AuthScreen({
                 <>
                   <p className="hint" style={{ marginTop: 6 }}>
                     Varnox can tell you when a new message arrives, so you do not have to keep
-                    the app open to notice one. Your browser will ask you to confirm; you can
-                    change your answer later in its settings.
+                    the app open to notice one.{' '}
+                    {nativeNotificationsAvailable()
+                      ? 'Android will ask you to confirm; you can change your answer later in the app’s notification settings.'
+                      : 'Your browser will ask you to confirm; you can change your answer later in its settings.'}
                   </p>
 
                   {notifyOutcome === 'granted' || notifyOutcome === 'unavailable' ? null : (
@@ -1301,7 +1323,9 @@ export function AuthScreen({
                       {notifyOutcome === 'granted'
                         ? 'Notifications are on. You will be told when a message arrives.'
                         : notifyOutcome === 'denied'
-                          ? 'Notifications are blocked for this site. You can allow them again in your browser settings.'
+                          ? nativeNotificationsAvailable()
+                            ? 'Notifications are blocked for Varnox. You can allow them again in Android settings.'
+                            : 'Notifications are blocked for this site. You can allow them again in your browser settings.'
                           : notifyOutcome === 'dismissed'
                             ? 'The question was dismissed, so notifications stay off for now.'
                             : notifyOutcome === 'unavailable'
