@@ -240,6 +240,105 @@ export const ADMIN_COOKIE = 'vx_admin';
  * requires the purpose below, so a session token can never be accepted as an unlock. The two are
  * not interchangeable in either direction, which is the property that matters.
  */
+/**
+ * A client token: for an app rather than a browser.
+ *
+ * Deliberately NOT the same shape as a session cookie, and not a longer-lived copy of one. A
+ * session token and a client token are not interchangeable in either direction — the same property
+ * signAdminUnlock() below is built on, and for the same reason. A credential that can be presented
+ * somewhere it was not minted for is a credential whose lifetime cannot be reasoned about, and a
+ * session cookie measured in weeks would be good for weeks if it leaked into an app's storage.
+ *
+ * The kind matters as much as the purpose. An access token and a refresh token are the same kind
+ * of thing — signed, device-bound, revocable — so without a claim separating them the twelve-hour
+ * access token would mean nothing, because a client holding the thirty-day refresh token could
+ * simply present that instead. The short life is only real if the short-lived token is a different
+ * kind of token.
+ *
+ * The device id rides inside, so revoking one device ends that install's sessions immediately —
+ * which is what keeps "sign out my other devices" working for an app as well as a browser.
+ */
+export type ClientTokenKind = 'access' | 'refresh';
+
+/** Access tokens are hours, not days: they live on a device that gets lost. */
+const CLIENT_ACCESS_HOURS = 12;
+const CLIENT_REFRESH_HOURS = 24 * 30;
+
+export function signClientToken(
+  uid: string,
+  did: string,
+  kind: ClientTokenKind = 'access'
+): string {
+  const hours = kind === 'access' ? CLIENT_ACCESS_HOURS : CLIENT_REFRESH_HOURS;
+  const body = b64u(
+    Buffer.from(
+      JSON.stringify({ purpose: 'client', kind, uid, did, exp: Date.now() + hours * 3_600_000 })
+    )
+  );
+  const sig = b64u(crypto.createHmac('sha256', SECRET).update(body).digest());
+  return `${body}.${sig}`;
+}
+
+/** Verifies the signature, the purpose, the age, AND that it is the kind of token being asked for. */
+export function verifyClientToken(
+  token: string | undefined | null,
+  kind: ClientTokenKind
+): { uid: string; did: string } | null {
+  if (!token || !token.includes('.')) return null;
+  const [body, sig] = token.split('.');
+  if (!body || !sig) return null;
+
+  const expected = b64u(crypto.createHmac('sha256', SECRET).update(body).digest());
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString()) as {
+      purpose?: string;
+      kind?: string;
+      uid?: string;
+      did?: string;
+      exp?: number;
+    };
+    if (payload.purpose !== 'client') return null;
+    if (payload.kind !== kind) return null;
+    if (!payload.uid || !payload.did) return null;
+    if (!payload.exp || payload.exp < Date.now()) return null;
+    return { uid: payload.uid, did: payload.did };
+  } catch {
+    return null;
+  }
+}
+
+/** The bearer token from a request, or null. */
+export function bearerFrom(req: Request): string | null {
+  const header = req.headers.get('authorization') ?? '';
+  const [scheme, token] = header.split(' ');
+  // The scheme is case-insensitive per RFC 7235. The token is not folded — it is base64url, and
+  // case is data.
+  if (!scheme || scheme.toLowerCase() !== 'bearer' || !token) return null;
+  return token;
+}
+
+/**
+ * The account behind a Bearer ACCESS token, or null.
+ *
+ * The device is checked as well as the signature, which is the whole reason the device id is in
+ * the token: revoking a device has to end its sessions at once, not whenever the token happens to
+ * expire. A refresh token is refused here by verifyClientToken, so the short access life is real.
+ */
+export async function clientUser(req: Request): Promise<User | null> {
+  const claims = verifyClientToken(bearerFrom(req), 'access');
+  if (!claims) return null;
+  if (!(await isDeviceActive(claims.did))) return null;
+
+  const user = await getUser(claims.uid);
+  if (!user) return null;
+  if (await isAccountDeleted(user.id)) return null;
+  return user;
+}
+
 export function signAdminUnlock(): string {
   const body = b64u(
     Buffer.from(JSON.stringify({ purpose: 'admin', exp: Date.now() + ADMIN_UNLOCK_MS }))
