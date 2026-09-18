@@ -965,6 +965,7 @@ export function Messenger({
       <Sidebar
         me={me}
         settings={settings}
+        isAdmin={isAdmin}
         chats={visible}
         archived={archived}
         ready={listReady}

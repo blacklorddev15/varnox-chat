@@ -22,6 +22,7 @@ import {
   IconExit,
   IconGroup,
   IconImage,
+  IconLock,
   IconLogo,
   IconMenu,
   IconMic,
@@ -58,6 +59,7 @@ export function Sidebar({
   onSettings,
   onStarred,
   onSearch,
+  isAdmin,
   onJoinByCode,
   onToggleTheme,
   onSignOut,
@@ -87,6 +89,8 @@ export function Sidebar({
   onSettings: () => void;
   onStarred: () => void;
   onSearch: () => void;
+  /** Whether this account may reach the control panel. The entry is hidden, not disabled. */
+  isAdmin?: boolean;
   onJoinByCode: (code: string) => void;
   onToggleTheme: () => void;
   onSignOut: () => void;
@@ -292,6 +296,28 @@ export function Sidebar({
                 <span className="menu-label">Settings</span>
                 <IconChevron size={16} className="menu-chev" />
               </button>
+              {/*
+                Shown only to an account on the allowlist, and not merely disabled for anyone
+                else. A control that exists but refuses is still a control somebody will try, and
+                its presence is a hint about how the app is administered — which is worth more to
+                the wrong person than the entry is to the right one.
+
+                A real navigation rather than a route push: /admin is a separate page with its own
+                server-side gate, not a pane, and the sidebar has no other reason to hold a router.
+              */}
+              {isAdmin ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    window.location.assign('/admin');
+                  }}
+                >
+                  <IconLock size={18} className="menu-ic" />
+                  <span className="menu-label">Admin</span>
+                  <IconChevron size={16} className="menu-chev" />
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => {
