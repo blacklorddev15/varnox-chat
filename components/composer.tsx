@@ -293,6 +293,7 @@ export function Composer({
             areaRef.current?.focus();
           }}
           onClose={() => setEmoji(false)}
+          onBackspace={() => setText((t) => t.slice(0, -1))}
         />
       ) : null}
 
