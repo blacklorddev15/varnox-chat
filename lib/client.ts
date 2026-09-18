@@ -1,22 +1,75 @@
 'use client';
 
-/** Browser-side fetch helper for the Varnox API. */
+import { OfflineError, cacheGet, cachePut, markNetworkDown, markNetworkUp } from './offline';
+
+/**
+ * Browser-side fetch helper for the Varnox API.
+ *
+ * Reads are remembered so the app still has something to show without a connection. Writes are
+ * not queued and not retried — a message that was written while offline and sent minutes later
+ * would arrive in an order nobody could see coming, so sending is simply refused and says so.
+ * See lib/offline.ts for why the app now keeps a copy of anything at all.
+ */
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    cache: 'no-store',
-    credentials: 'same-origin',
-    headers:
-      init.body instanceof FormData
-        ? init.headers
-        : { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
-  });
+  const method = (init.method ?? 'GET').toUpperCase();
+  /** Only GETs are kept. A write is a change, and a stale copy of one is worse than none. */
+  const readable = method === 'GET';
+
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      ...init,
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers:
+        init.body instanceof FormData
+          ? init.headers
+          : { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
+    });
+  } catch {
+    // The request never left the device. This is the real evidence of being offline — richer
+    // than navigator.onLine, which is true on a wifi that goes nowhere.
+    markNetworkDown();
+    if (readable) {
+      const cached = cacheGet<T>(path);
+      if (cached.hit) return cached.value;
+    }
+    throw new OfflineError();
+  }
+
+  markNetworkUp();
+
   let payload: unknown = null;
   try {
     payload = await res.json();
   } catch {
     payload = null;
   }
+
+  /**
+   * A server-side failure is treated like a network failure for reads.
+   *
+   * This is what makes the app work offline in the bundled Android build, where the page is
+   * served from a loopback address and an unreachable backend comes back as a 502 from the
+   * local proxy rather than as a thrown fetch. Without this branch, that build would show a
+   * blank screen offline while the browser build showed the cached chat — the same situation
+   * behaving two ways depending on which shell is asking.
+   *
+   * Only 5xx. A 401, 403 or 404 is the server giving a real answer about the request, and
+   * answering that with an old copy would be inventing a truth the server has just denied.
+   */
+  if (!res.ok && readable && res.status >= 500) {
+    const cached = cacheGet<T>(path);
+    if (cached.hit) {
+      // Marked knowing, because answering from the cache without saying so is the one outcome
+      // worse than showing nothing: the app would present an old chat as the current one and
+      // offer no reason to think otherwise. Every successful request clears it again, so this
+      // corrects itself the moment the backend answers.
+      markNetworkDown();
+      return cached.value;
+    }
+  }
+
   if (!res.ok) {
     const message =
       payload && typeof payload === 'object' && 'error' in payload
@@ -24,6 +77,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
         : `Request failed (${res.status})`;
     throw new Error(message);
   }
+
+  if (readable) cachePut(path, payload);
   return payload as T;
 }
 

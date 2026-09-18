@@ -1927,6 +1927,26 @@ html[data-theme='dark'] .tag {
   font-size: 13.4px;
 }
 
+/* Shown only while the app cannot reach the server.
+   Fixed to the top rather than sitting in the flow, because it has to be visible from wherever
+   somebody happens to be — including over the composer, which is the one place its message
+   actually matters. The safe-area inset keeps it clear of the status bar, which it would
+   otherwise sit under because the viewport is declared with viewportFit: cover. */
+.offline-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 70;
+  padding: calc(7px + env(safe-area-inset-top, 0px)) 16px 7px;
+  background: var(--gold-tint);
+  border-bottom: 1px solid var(--gold-edge);
+  color: var(--text);
+  font-size: 12.8px;
+  text-align: center;
+  letter-spacing: 0.01em;
+}
+
 /* ------------------------------------------------------------- settings */
 
 /* Settings is a page now, so it fills the chat column rather than the viewport: the sidebar

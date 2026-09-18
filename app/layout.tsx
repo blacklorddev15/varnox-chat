@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Inter, Playfair_Display } from 'next/font/google';
 import './globals.css';
 import { ServiceWorkerRegistrar } from '@/components/sw-register';
+import { OfflineBanner } from '@/components/offline-banner';
 
 /**
  * The reference's two families. Self-hosted through next/font rather than linked from
@@ -71,6 +72,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         {children}
+        <OfflineBanner />
         <ServiceWorkerRegistrar />
       </body>
     </html>
