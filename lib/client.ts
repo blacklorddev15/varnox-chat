@@ -1,6 +1,13 @@
 'use client';
 
-import { OfflineError, cacheGet, cachePut, markNetworkDown, markNetworkUp } from './offline';
+import {
+  OfflineError,
+  cacheGet,
+  cachePut,
+  isCacheableRead,
+  markNetworkDown,
+  markNetworkUp,
+} from './offline';
 
 /**
  * Browser-side fetch helper for the Varnox API.
@@ -12,8 +19,13 @@ import { OfflineError, cacheGet, cachePut, markNetworkDown, markNetworkUp } from
  */
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = (init.method ?? 'GET').toUpperCase();
-  /** Only GETs are kept. A write is a change, and a stale copy of one is worse than none. */
-  const readable = method === 'GET';
+  /**
+   * Only GETs, and only the ones worth keeping. A write is a change, and a stale copy of one is
+   * worse than none; a cursor or a live session is not a thing that can be remembered at all.
+   * See isCacheableRead, which is where the second half of that is spelled out — the short
+   * version is that the call's signalling poll must not go near this.
+   */
+  const readable = method === 'GET' && isCacheableRead(path);
 
   let res: Response;
   try {

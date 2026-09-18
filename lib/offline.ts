@@ -33,6 +33,31 @@ const BUDGET_BYTES = 4 * 1024 * 1024;
 
 type IndexEntry = { path: string; at: number; size: number };
 
+/**
+ * Reads that must never be kept.
+ *
+ * The rule is two rules, and both come from the same idea: keep a picture of something, never a
+ * piece of something in motion.
+ *
+ *   - A path carrying `after=` or `since=` is a cursor — it asks "what has happened since N" and
+ *     answers with an increment, not a snapshot. Keeping it is not merely useless, it is
+ *     unbounded: the call's signalling poll is `?after=<seq>` once a second, and every ICE
+ *     candidate moves the sequence on, so a single call writes dozens of separate entries and
+ *     evicts the conversations somebody actually wanted to read. It also means a synchronous
+ *     localStorage write on the main thread for every second of every call.
+ *
+ *   - A call and a typing indicator are live sessions. A call that has ended is over; serving a
+ *     remembered `/api/calls/active` from a cache would put a call screen back on a phone for a
+ *     conversation that finished, and pressing hang up on it would do nothing. Presence is the
+ *     same — "last seen 2 minutes ago" replayed an hour later is worse than no answer.
+ */
+const PERISHABLE = [/^\/api\/calls\//, /^\/api\/presence/, /\/typing$/];
+
+export function isCacheableRead(path: string): boolean {
+  if (path.includes('after=') || path.includes('since=')) return false;
+  return !PERISHABLE.some((pattern) => pattern.test(path));
+}
+
 function storage(): Storage | null {
   try {
     if (typeof window === 'undefined') return null;
@@ -85,9 +110,35 @@ function evict(entries: IndexEntry[]): IndexEntry[] {
     } catch {
       // Already gone, or storage refused. Either way it is no longer counted.
     }
+    // Forgetting this matters: the fingerprint is what says "the stored copy is already this",
+    // and leaving it behind after a drop would make the next write of that path be skipped as a
+    // duplicate — leaving nothing stored and the fingerprint claiming otherwise.
+    written.delete(dropped.path);
   }
   return oldestFirst;
 }
+
+/**
+ * A cheap summary of what was last written for a path, so an unchanged answer costs nothing.
+ *
+ * The chats list is polled every three and a half seconds and is usually identical. Writing it
+ * anyway would be a synchronous localStorage write on the main thread four times a minute for no
+ * change at all, which is the kind of thing that shows up as a stutter and is very hard to trace
+ * back to a cache nobody thinks is doing anything.
+ *
+ * Length first because it differs most of the time and costs nothing; the hash only runs when the
+ * lengths match, which is exactly when a real comparison is needed.
+ */
+function fingerprint(serialised: string): string {
+  let hash = 5381;
+  for (let i = 0; i < serialised.length; i += 1) {
+    hash = ((hash << 5) + hash + serialised.charCodeAt(i)) | 0;
+  }
+  return `${serialised.length}:${hash}`;
+}
+
+/** What was last written per path, in memory only. See {@link fingerprint}. */
+const written = new Map<string, string>();
 
 /** Stores a successful read, keyed by the path it was made from. */
 export function cachePut(path: string, value: unknown): void {
@@ -102,6 +153,10 @@ export function cachePut(path: string, value: unknown): void {
     return;
   }
 
+  const print = fingerprint(serialised);
+  // Already stored, exactly as it is now. Nothing to do, and nothing to write.
+  if (written.get(path) === print) return;
+
   try {
     store.setItem(PREFIX + path, serialised);
   } catch {
@@ -110,6 +165,7 @@ export function cachePut(path: string, value: unknown): void {
     // worth surfacing — the cache simply stops growing.
     return;
   }
+  written.set(path, print);
 
   const size = serialised.length + path.length;
   const rest = readIndex().filter((entry) => entry.path !== path);
@@ -142,6 +198,7 @@ export function cacheGet<T>(path: string): { hit: true; value: T } | { hit: fals
 }
 
 export function cacheClear(): void {
+  written.clear();
   const store = storage();
   if (!store) return;
   try {
