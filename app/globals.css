@@ -1260,26 +1260,26 @@ html[data-theme='dark'] .sel-bar {
 
 /* ---------------------------------------------------------------- emoji */
 
+/*
+ * A screen of its own, not a strip above the composer.
+ *
+ * At 292px it was shorter than the keyboard it stands in for; a 70vh sheet was still wrong,
+ * because the panel carries its own search, segments and category bar and those are competing
+ * for the same room as the grid. Sizing it against the viewport rather than a fixed height also
+ * sidesteps the vh-versus-dvh problem entirely — inset:0 is the visible viewport by
+ * definition, so there is nothing to fall back to on browsers without dvh.
+ *
+ * Deliberately mirrors .picker, so opening the emoji panel and opening the gallery read as the
+ * same move. Nothing between here and the viewport applies a transform, which is what would
+ * otherwise make `fixed` position against that ancestor instead.
+ */
 .emoji-panel {
-  border-top: 1px solid var(--line);
-  background: var(--panel-2);
-  height: 70vh;
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--app-bg);
   display: flex;
   flex-direction: column;
-  flex: none;
-}
-
-/*
- * dvh rather than vh: on mobile, vh is measured against the largest possible viewport, so a
- * sheet sized in vh reaches under the address bar whenever the bar is showing. This lives in
- * its own @supports block rather than as a second `height` inside the rule above because a
- * minifier may — and did — discard a declaration the very next line overrides, which left
- * browsers without dvh with no height at all.
- */
-@supports (height: 1dvh) {
-  .emoji-panel {
-    height: 70dvh;
-  }
 }
 
 /* The picker's bar: back, search, the emoji / GIF / sticker segments, and the key that deletes
