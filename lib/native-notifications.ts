@@ -17,6 +17,7 @@ type NativeBridge = {
   notificationsEnabled?: () => boolean;
   setNotifications?: (enabled: boolean) => void;
   notificationDiagnostics?: () => string;
+  testNotification?: () => void;
 };
 
 /** What the shell reports about the background connection, as far as it is willing to say. */
@@ -54,6 +55,28 @@ export function nativeNotificationsEnabled(): boolean {
   if (typeof native?.notificationsEnabled !== 'function') return false;
   try {
     return native.notificationsEnabled() === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Ask the shell to post a notification now.
+ *
+ * Returns whether the shell can do it at all, not whether the notification appeared — that is
+ * the point of asking. Android may need to raise its permission dialog first, in which case the
+ * notification arrives after the answer and long after this has returned; there is nothing to
+ * wait for, and nothing this call could report beyond "the app was asked".
+ *
+ * False in a browser, where notification permission is the browser's business and the settings
+ * screen already has a switch for it.
+ */
+export function sendTestNotification(): boolean {
+  const native = bridge();
+  if (typeof native?.testNotification !== 'function') return false;
+  try {
+    native.testNotification();
+    return true;
   } catch {
     return false;
   }

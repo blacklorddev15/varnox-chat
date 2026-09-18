@@ -16,6 +16,7 @@ import {
   enableNativeNotifications,
   nativeNotificationDiagnostics,
   nativeNotificationsAvailable,
+  sendTestNotification,
   setNativeNotifications,
   type NotificationDiagnostics,
 } from '@/lib/native-notifications';
@@ -564,6 +565,31 @@ export function SettingsScreen({
                 : 'Your browser asks for permission the first time you switch this on.'}
             </p>
             <NotificationHealth />
+            {nativeNotificationsAvailable() ? (
+              <button
+                type="button"
+                className="settings-row"
+                onClick={() => {
+                  const asked = sendTestNotification();
+                  onToast(
+                    asked
+                      ? 'Sent — it should appear in a moment. It clears itself.'
+                      : 'This app cannot post a test notification'
+                  );
+                }}
+              >
+                <span className="txt">
+                  Send a test notification
+                  {/* Says what the test does and does not prove, because the answer it gives is
+                      only half the story — the line above covers the other half. */}
+                  <small>
+                    Posts one now, to check Android is not blocking Varnox. It does not test whether
+                    messages are arriving — the line above does that.
+                  </small>
+                </span>
+                <IconBell />
+              </button>
+            ) : null}
           </div>
         ) : null}
 
