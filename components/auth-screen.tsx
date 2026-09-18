@@ -15,7 +15,7 @@ import { IconLogo } from './icons';
  * accounts created before phone login did have a password and must keep working.
  */
 
-type Step = 'phone' | 'code' | 'name' | 'password' | 'link';
+type Step = 'phone' | 'code' | 'name' | 'password' | 'link' | 'reset';
 
 type Country = { dial: string; label: string };
 
@@ -147,6 +147,20 @@ export function AuthScreen({
   const [passwordMode, setPasswordMode] = useState<'login' | 'register'>(
     startRegister ? 'register' : 'login'
   );
+
+  /**
+   * Recovering an account, as three small steps rather than a screen of its own.
+   *
+   * 'ask' takes the email and the number, 'code' takes the code and the new password, and 'done'
+   * says it worked. Both halves of the pair have to name the same account on the server — a number
+   * that belongs to somebody else is refused — which is why the two are asked together and why the
+   * refusal does not say which half was wrong.
+   */
+  const [resetStage, setResetStage] = useState<'ask' | 'code' | 'done'>('ask');
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetPhone, setResetPhone] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [resetPassword, setResetPassword] = useState('');
   /**
    * Creating an account collects a phone number, then a username and an address, then a
    * password, then an optional profile picture, then the terms, then a decision about
@@ -257,6 +271,44 @@ export function AuthScreen({
    * does, so it is also the only thing standing between a typed address and an account that claims
    * it.
    */
+  async function startReset(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await post('/api/auth/reset/start', { email: resetEmail.trim(), phone: resetPhone.trim() });
+      setResetCode('');
+      setResetStage('code');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function finishReset(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await post('/api/auth/reset/confirm', {
+        email: resetEmail.trim(),
+        phone: resetPhone.trim(),
+        code: resetCode.replace(/\D/g, ''),
+        password: resetPassword,
+      });
+      setResetCode('');
+      setResetPassword('');
+      setResetStage('done');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function sendCode(e?: React.FormEvent) {
     e?.preventDefault();
     if (busy) return;
@@ -780,6 +832,130 @@ export function AuthScreen({
           </>
         ) : null}
 
+        {step === 'reset' ? (
+          <>
+            <h1>Reset your password</h1>
+
+            {resetStage === 'done' ? (
+              <>
+                <p className="sub">
+                  Your password has been changed. Sign in with the new one.
+                </p>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => {
+                    setResetStage('ask');
+                    setPasswordMode('login');
+                    setError('');
+                    setStep('password');
+                  }}
+                >
+                  Sign in
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="sub">
+                  Enter the email and the number on the account. A code goes to the email, and both
+                  have to match the same account — so a number that is not yours will not work.
+                </p>
+
+                <form onSubmit={resetStage === 'ask' ? startReset : finishReset}>
+                  <div className="field-row">
+                    <label htmlFor="resetEmail">Email address</label>
+                    <input
+                      id="resetEmail"
+                      className="input"
+                      type="email"
+                      value={resetEmail}
+                      onChange={(e) => setResetEmail(e.target.value)}
+                      autoComplete="email"
+                      required
+                    />
+                  </div>
+
+                  <div className="field-row">
+                    <label htmlFor="resetPhone">Phone number on the account</label>
+                    <input
+                      id="resetPhone"
+                      className="input"
+                      value={resetPhone}
+                      onChange={(e) => setResetPhone(e.target.value)}
+                      placeholder="254712345678"
+                      inputMode="tel"
+                      required
+                    />
+                    <p className="hint" style={{ marginTop: 6 }}>
+                      Include the country code. It is never texted — it is checked against the
+                      account, which is what makes it worth asking for.
+                    </p>
+                  </div>
+
+                  {resetStage === 'code' ? (
+                    <>
+                      <div className="field-row">
+                        <label htmlFor="resetCode">Code from the email</label>
+                        <input
+                          id="resetCode"
+                          className="input"
+                          value={resetCode}
+                          onChange={(e) => setResetCode(e.target.value)}
+                          placeholder="000000"
+                          inputMode="numeric"
+                          autoComplete="one-time-code"
+                          maxLength={6}
+                          required
+                        />
+                      </div>
+
+                      <div className="field-row">
+                        <label htmlFor="resetPassword">New password</label>
+                        <input
+                          id="resetPassword"
+                          className="input"
+                          type="password"
+                          value={resetPassword}
+                          onChange={(e) => setResetPassword(e.target.value)}
+                          autoComplete="new-password"
+                          minLength={6}
+                          required
+                        />
+                        <p className="hint" style={{ marginTop: 6 }}>
+                          At least 6 characters.
+                        </p>
+                      </div>
+                    </>
+                  ) : null}
+
+                  {error ? <p className="error">{error}</p> : null}
+
+                  <button className="btn" type="submit" disabled={busy}>
+                    {busy
+                      ? 'Please wait…'
+                      : resetStage === 'ask'
+                        ? 'Send a code'
+                        : 'Change my password'}
+                  </button>
+                </form>
+
+                <div className="switch-line">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResetStage('ask');
+                      setError('');
+                      setStep('password');
+                    }}
+                  >
+                    Back to sign in
+                  </button>
+                </div>
+              </>
+            )}
+          </>
+        ) : null}
+
         {step === 'link' ? (
           <>
             <h1>Link a device</h1>
@@ -911,6 +1087,20 @@ export function AuthScreen({
               </button>
               <button type="button" onClick={() => { setStep('phone'); setError(''); }}>
                 Use a phone code instead
+              </button>
+              {/*
+                Beside "Use a password instead" rather than on the front door: this is for somebody
+                who already has an account, and the front door is for people who do not.
+              */}
+              <button
+                type="button"
+                onClick={() => {
+                  setResetStage('ask');
+                  setError('');
+                  setStep('reset');
+                }}
+              >
+                Forgot your password?
               </button>
               <button type="button" onClick={() => { setStep('link'); setError(''); }}>
                 Link a device
