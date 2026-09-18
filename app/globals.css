@@ -17,8 +17,8 @@
    the presence dot, which stays green: green-for-online is read at a glance from
    muscle memory, and a gold dot would be indistinguishable from the accent.
 
-   No third-party logo, name or artwork is used anywhere in this app. The backdrop
-   photograph is the operator's own file, served from /fire-bg.jpg.
+   No third-party logo, name or artwork is used anywhere in this app, and the backdrop
+   is a plain gradient painted in CSS rather than a picture.
    ========================================================================== */
 
 :root {
@@ -85,8 +85,8 @@ html[data-theme='light'] {
   --header: #2b2110;
   --header-text: #f4dfa4;
   --header-muted: #cdb582;
-  --bubble-in: #ffffff;
-  --bubble-out: #fbf0d2;
+  --bubble-in: #e8f5e9;
+  --bubble-out: #c8e6c9;
   --chat-bg: #f7f0e2;
   --doodle: #c6b087;
   --link: #8a6410;
@@ -128,9 +128,10 @@ html[data-theme='dark'] {
   --header: #0c0c0e;
   --header-text: #facc15;
   --header-muted: #a1a1aa;
-  --bubble-in: #141417;
-  /* Outgoing keeps the accent wash rather than a solid gold, which would drown the text. */
-  --bubble-out: rgba(250, 204, 21, 0.12);
+  --bubble-in: #132a1b;
+  /* Both directions are green. Incoming sits deeper so the two are still told apart
+     at a glance without bringing a second hue back in. */
+  --bubble-out: #1b7a3f;
   --chat-bg: #09090b;
   --doodle: #3f3f46;
   --link: #facc15;
@@ -3156,43 +3157,51 @@ html[data-theme='dark'] .call-dir {
 /* ==========================================================================
    The gold backdrop
 
-   The photograph sits under a scrim rather than being used raw. Message text is
-   drawn straight onto this surface, and a bright flame behind a line of 14px text
-   is unreadable however good the picture is — so the picture is felt rather than
-   read, and the scrim is what buys the contrast back.
+   The backdrop is painted, not photographed: one gold gradient with nothing on it.
+   No image, no swirls, no halftone, no texture.
+
+   A scrim still sits over the gradient. Message text is drawn straight onto this
+   surface, and unsoftened gold behind a line of 14px text is unreadable however good
+   it looks, so the scrim is what buys the contrast back.
 
    Two scrims, because the two surfaces carry different things. The shell is mostly
    covered by panels, so it can stay lighter, while the chat canvas holds the text
    and needs more. The chat scrim is a slight vertical gradient so the middle of the
-   pane — where the flames are brightest — is dimmed most.
+   pane — where the gradient is richest — stays clearest.
 
-   Dark theme only. A black photograph under the light theme's cream surfaces would
-   fight every other colour in it, so the light theme keeps its warm paper ground and
-   takes only the gold. To give the light theme the photograph too, move these rules
-   out of the [data-theme='dark'] scope and raise the scrim towards white.
+   Dark theme only. The light theme keeps its warm paper ground; painting gold under
+   cream surfaces would fight every other colour in it.
 
    No background-attachment: fixed. It is unreliable on iOS Safari, where it is
    treated as scroll and can jitter while a phone scrolls a message list.
    ========================================================================== */
 :root {
-  --fire-scrim-app: linear-gradient(rgba(9, 7, 4, 0.45), rgba(9, 7, 4, 0.45));
+  /* The entire backdrop: one gradient, no artwork. */
+  --gold-backdrop: linear-gradient(
+    180deg,
+    #120c04 0%,
+    #3a2708 34%,
+    #7d5810 70%,
+    #c2942a 100%
+  );
+  --fire-scrim-app: linear-gradient(rgba(9, 7, 4, 0.3), rgba(9, 7, 4, 0.3));
   --fire-scrim-chat: linear-gradient(
     180deg,
-    rgba(9, 7, 4, 0.62) 0%,
-    rgba(9, 7, 4, 0.45) 38%,
-    rgba(9, 7, 4, 0.68) 100%
+    rgba(9, 7, 4, 0.46) 0%,
+    rgba(9, 7, 4, 0.3) 38%,
+    rgba(9, 7, 4, 0.5) 100%
   );
 }
 
 html[data-theme='dark'] body {
-  background-image: var(--fire-scrim-app), url('/fire-bg.jpg');
+  background-image: var(--fire-scrim-app), var(--gold-backdrop);
   background-size: cover, cover;
   background-position: center, center;
   background-repeat: no-repeat, no-repeat;
 }
 
 html[data-theme='dark'] .chat-pane {
-  background-image: var(--fire-scrim-chat), url('/fire-bg.jpg');
+  background-image: var(--fire-scrim-chat), var(--gold-backdrop);
   background-size: cover, cover;
   background-position: center, center;
   background-repeat: no-repeat, no-repeat;

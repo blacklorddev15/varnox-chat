@@ -3,11 +3,13 @@
 /* The version is bumped whenever the shell changes shape, because activate() deletes every
    cache whose name does not match — that is what makes a change to the shell actually reach
    a browser that already has the old one. */
-const CACHE = 'varnox-shell-v2';
-/* The backdrop is part of the shell rather than chat content: nothing else would ever cache
-   it, since it is neither a navigation nor under /_next/static, so offline it would simply
-   vanish and leave the flat fallback colour behind the messages. */
-const SHELL = ['/', '/login', '/icon.svg', '/manifest.webmanifest', '/fire-bg.jpg'];
+const CACHE = 'varnox-shell-v3';
+/* The backdrop used to be listed here as /fire-bg.jpg, because as a plain asset it was neither
+   a navigation nor under /_next/static and so nothing else would have cached it. It is now a
+   CSS gradient compiled into the stylesheet, which the /_next/static branch already covers.
+   Worth knowing: cache.addAll rejects as a whole if any single entry 404s, so leaving a dead
+   path in this array would silently leave the entire offline shell empty. */
+const SHELL = ['/', '/login', '/icon.svg', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
