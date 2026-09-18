@@ -33,6 +33,11 @@ const EXTENSIONS: Record<string, string> = {
   'audio/mp4': 'm4a',
   'audio/wav': 'wav',
   'audio/x-m4a': 'm4a',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'video/quicktime': 'mov',
+  'video/x-matroska': 'mkv',
+  'video/x-msvideo': 'avi',
 };
 
 export async function saveMedia(bytes: Buffer, mime: string, once = false): Promise<StoredMedia> {

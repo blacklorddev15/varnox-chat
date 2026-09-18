@@ -15,11 +15,24 @@ import {
   IconLocation,
   IconMic,
   IconSend,
+  IconVideoCall,
 } from './icons';
+
+/**
+ * The ceiling for a video, in bytes.
+ *
+ * Not a preference. A Vercel function cannot receive a request body larger than 4.5 MB, and the
+ * upload route sits at 4 MB to stay under it, so this is the platform's number rather than the
+ * app's. Checking it here rather than only on the server means a video that could never be
+ * accepted is refused before a wasted upload over a phone connection — and the sentence it
+ * produces can say why, which a bare rejected response cannot.
+ */
+const MAX_VIDEO_BYTES = 4 * 1024 * 1024;
 
 export type Outgoing = {
   text: string;
   image?: File | null;
+  video?: File | null;
   audio?: { blob: Blob; sec: number } | null;
   file?: File | null;
   /** A shared location pin; coordinates come from the geolocation API. */
@@ -51,6 +64,7 @@ export function Composer({
   const [emoji, setEmoji] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [image, setImage] = useState<File | null>(null);
+  const [video, setVideo] = useState<File | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   /** Images chosen from the gallery, held open in the picker until they are sent or dropped. */
@@ -69,6 +83,7 @@ export function Composer({
 
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
   const imageRef = useRef<HTMLInputElement | null>(null);
+  const videoRef = useRef<HTMLInputElement | null>(null);
   const cameraRef = useRef<HTMLInputElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -155,10 +170,13 @@ export function Composer({
   function submit() {
     const body = text.trim();
     if (sending) return;
-    if (!body && !image && !file) return;
-    onSend({ text: body, image, file, once: viewOnce });
+    if (!body && !image && !video && !file) return;
+    // A video is never view-once: the flag means nothing for something the server will not
+    // spend, and the upload route refuses it outright.
+    onSend({ text: body, image, video, file, once: video ? false : viewOnce });
     setText('');
     setImage(null);
+    setVideo(null);
     setFile(null);
     setEmoji(false);
     setViewOnce(false);
@@ -372,6 +390,21 @@ export function Composer({
         </div>
       ) : null}
 
+      {video ? (
+        <div className="attach-preview">
+          <span className="ic" style={{ width: 52, height: 52, display: 'grid', placeItems: 'center' }}>
+            <IconVideoCall size={24} />
+          </span>
+          <div className="info">
+            <b>{video.name}</b>
+            <div className="hint">{Math.max(1, Math.round(video.size / 1024))} KB</div>
+          </div>
+          <button type="button" className="icon-btn" onClick={() => setVideo(null)} title="Remove">
+            <IconClose />
+          </button>
+        </div>
+      ) : null}
+
       {emoji ? (
         <EmojiPanel
           onPick={(e) => {
@@ -469,6 +502,16 @@ export function Composer({
               <button
                 type="button"
                 className="attach-tile"
+                onClick={() => pickWith(() => videoRef.current?.click())}
+              >
+                <span className="attach-ic">
+                  <IconVideoCall size={22} />
+                </span>
+                <span>Video</span>
+              </button>
+              <button
+                type="button"
+                className="attach-tile"
                 onClick={() => pickWith(() => cameraRef.current?.click())}
               >
                 <span className="attach-ic">
@@ -521,6 +564,32 @@ export function Composer({
             setGalleryOpen(true);
           }}
         />
+        {/* One video at a time, and refused here if it is over the ceiling rather than after a
+            full upload. Recording one is left to the phone's own camera app, which every handset
+            already has, so this asks for video and lets the system offer both. */}
+        <input
+          ref={videoRef}
+          type="file"
+          accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
+          hidden
+          onChange={(e) => {
+            const chosen = e.target.files?.[0] ?? null;
+            e.target.value = '';
+            setError('');
+            if (!chosen) return;
+            if (chosen.size > MAX_VIDEO_BYTES) {
+              const mb = (chosen.size / (1024 * 1024)).toFixed(1);
+              setError(
+                `That video is ${mb} MB. Videos have to be under 4 MB here — a few seconds — because a Vercel function cannot accept a bigger upload. Sending longer video needs storage outside the app.`
+              );
+              return;
+            }
+            setVideo(chosen);
+            setImage(null);
+            setFile(null);
+          }}
+        />
+
         {/* Separate from the gallery input: capture makes a phone open the camera directly. */}
         <input
           ref={cameraRef}
@@ -644,7 +713,7 @@ export function Composer({
           </div>
         </div>
 
-        {text.trim() || image || file ? (
+        {text.trim() || image || video || file ? (
           <button type="button" className="send-btn" onClick={submit} disabled={sending} title="Send">
             <IconSend size={20} />
           </button>

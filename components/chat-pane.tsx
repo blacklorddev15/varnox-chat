@@ -618,6 +618,25 @@ export function ChatPane({
                     />
                   ) : null}
 
+                  {msg.type === 'video' && msg.mediaUrl ? (
+                    // playsInline stops iOS taking the video full screen on its own, which
+                    // otherwise happens the moment playback starts and loses the chat behind it.
+                    <video
+                      className="media"
+                      src={msg.mediaUrl}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      // Reserve the right shape before the first frame arrives, so a video does
+                      // not shove the conversation up the screen as it loads.
+                      style={
+                        msg.mediaW && msg.mediaH
+                          ? { aspectRatio: `${msg.mediaW} / ${msg.mediaH}` }
+                          : undefined
+                      }
+                    />
+                  ) : null}
+
                   {msg.type === 'audio' && msg.mediaUrl && !msg.once ? (
                     <VoiceNote src={msg.mediaUrl} sec={msg.audioSec ?? 0} />
                   ) : null}

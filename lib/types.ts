@@ -94,7 +94,15 @@ export type MemberMarker = {
   left?: boolean;
 };
 
-export type MessageType = 'text' | 'image' | 'audio' | 'file' | 'system' | 'location' | 'contact';
+export type MessageType =
+  | 'text'
+  | 'image'
+  | 'audio'
+  | 'video'
+  | 'file'
+  | 'system'
+  | 'location'
+  | 'contact';
 
 /**
  * Structured extras for the message types that carry no media: a shared location pin

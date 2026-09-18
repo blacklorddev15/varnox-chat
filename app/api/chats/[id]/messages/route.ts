@@ -111,7 +111,9 @@ export async function POST(req: Request, ctx: Ctx) {
     }
 
     const body = await readJsonBody<SendBody>(req);
-    const type: MessageType = ['image', 'audio', 'file', 'location', 'contact'].includes(String(body.type))
+    const type: MessageType = ['image', 'audio', 'video', 'file', 'location', 'contact'].includes(
+      String(body.type)
+    )
       ? (body.type as MessageType)
       : 'text';
     const text = clean(body.text, 4000);
@@ -179,6 +181,13 @@ export async function POST(req: Request, ctx: Ctx) {
       msg.mediaUrl = mediaUrl;
       msg.audioSec = Math.max(1, Math.round(Number(body.audioSec) || 1));
       msg.mime = clean(body.mime, 80) || 'audio/webm';
+    }
+    if (type === 'video') {
+      msg.mediaUrl = mediaUrl;
+      msg.mime = clean(body.mime, 80) || 'video/mp4';
+      // Dimensions are the poster frame's, used to lay the bubble out before the video loads.
+      if (body.mediaW) msg.mediaW = Math.round(Number(body.mediaW)) || undefined;
+      if (body.mediaH) msg.mediaH = Math.round(Number(body.mediaH)) || undefined;
     }
     if (type === 'file') {
       msg.mediaUrl = mediaUrl;

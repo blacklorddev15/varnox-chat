@@ -612,6 +612,7 @@ export function Messenger({
     async (payload: {
       text: string;
       image?: File | null;
+      video?: File | null;
       audio?: { blob: Blob; sec: number } | null;
       file?: File | null;
       location?: { lat: number; lng: number };
@@ -664,6 +665,15 @@ export function Messenger({
             mime: up.mime,
             replyTo: reply,
             ...(payload.once ? { once: true } : {}),
+          };
+        } else if (payload.video) {
+          const up = await uploadMedia(payload.video, 'video');
+          body = {
+            type: 'video',
+            text: payload.text,
+            mediaUrl: up.url,
+            mime: up.mime,
+            replyTo: reply,
           };
         } else if (payload.file) {
           const up = await uploadMedia(payload.file, 'auto');

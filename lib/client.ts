@@ -83,10 +83,13 @@ export type UploadResult = {
   once?: boolean;
 };
 
-/** Upload a photo, voice note or document. Photos are downscaled first. */
+/**
+ * Upload a photo, voice note, video or document. Photos are downscaled first; video is not
+ * touched, because re-encoding it in the browser would cost more time than the upload saves.
+ */
 export async function uploadMedia(
   file: File,
-  kind: 'image' | 'audio' | 'auto',
+  kind: 'image' | 'audio' | 'video' | 'auto',
   once = false
 ): Promise<UploadResult> {
   let blob: Blob = file;
